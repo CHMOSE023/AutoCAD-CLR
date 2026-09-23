@@ -1,0 +1,11 @@
+[
+  {"op":"add","parent":"/model","type":"polyline","props":{"points":"0,20000;6000,20000;6000,24000;0,24000","closed":true,"layer":"WALL"}},
+  {"op":"add","parent":"/model","type":"line","props":{"start":"-1000,22000","end":"8000,22000"}},
+  {"op":"add","parent":"/model","type":"circle","props":{"center":"3000,22000","radius":300}},
+  {"op":"edit","action":"offset","path":"$0","props":{"distance":240,"side":"3000,22000"}},
+  {"op":"edit","action":"mirror","path":"$2","props":{"axis":"6500,0;6500,1000"}},
+  {"op":"edit","action":"array","path":"$2","props":{"rows":2,"cols":3,"rowSpacing":-1000,"colSpacing":1500}},
+  {"op":"edit","action":"array","path":"$2","props":{"center":"3000,17000","count":6}},
+  {"op":"edit","action":"break","path":"$1","props":{"at":"1000,22000;2000,22000"}},
+  {"op":"edit","action":"explode","path":"$3"}
+]

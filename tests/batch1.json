@@ -1,0 +1,21 @@
+[
+  {"command":"add","parent":"/layers","type":"layer","props":{"name":"WALL","color":1}},
+  {"command":"add","parent":"/model","type":"polyline","props":{"points":"0,0;6000,0;6000,4000;0,4000","closed":true,"layer":"WALL"}},
+  {"command":"add","parent":"/model","type":"ellipse","props":{"center":"3000,2000","majorAxis":"1500,0","ratio":0.5}},
+  {"command":"add","parent":"/model","type":"ellipse","props":{"center":"9000,2000","majorAxis":"0,1000","ratio":0.6,"startAngle":0,"endAngle":180}},
+  {"command":"add","parent":"/model","type":"spline","props":{"points":"0,5000;1000,5800;2000,5000;3000,5600"}},
+  {"command":"add","parent":"/model","type":"spline","props":{"points":"4000,5000;5000,6000;6000,5000;5000,4500","method":"cv","closed":true}},
+  {"command":"add","parent":"/model","type":"xline","props":{"position":"0,0","direction":"1,1","layer":"AUX"}},
+  {"command":"add","parent":"/model","type":"ray","props":{"position":"6000,4000","direction":"1,0","layer":"AUX"}},
+  {"command":"add","parent":"/model","type":"hatch","props":{"boundary":"$1","pattern":"ANSI31","scale":50,"angle":0}},
+  {"command":"set","path":"$8","props":{"pattern":"AR-CONC","scale":2}},
+  {"command":"add","parent":"/model","type":"circle","props":{"center":"12000,2000","radius":800}},
+  {"command":"add","parent":"/model","type":"dimension","props":{"kind":"linear","p1":"0,0","p2":"6000,0","dimLine":"3000,-800","scale":100}},
+  {"command":"add","parent":"/model","type":"dimension","props":{"kind":"aligned","p1":"6000,0","p2":"6000,4000","dimLine":"6800,2000","scale":100,"text":"<> 墙长"}},
+  {"command":"add","parent":"/model","type":"dimension","props":{"kind":"angular","vertex":"0,0","p1":"1000,0","p2":"1000,1000","dimLine":"1500,500","scale":100}},
+  {"command":"add","parent":"/model","type":"dimension","props":{"kind":"radius","target":"$10","dimLine":"13500,3000","scale":100}},
+  {"command":"add","parent":"/model","type":"dimension","props":{"kind":"diameter","target":"$10","dimLine":"11000,1000","scale":100}},
+  {"command":"set","path":"$11","props":{"dimLine":"3000,-1200"}},
+  {"command":"add","parent":"/model","type":"leader","props":{"points":"3000,2000;4000,3200;5000,3200","text":"椭圆说明","height":250,"scale":100,"layer":"NOTE"}},
+  {"command":"add","parent":"/model","type":"text","props":{"text":"中文样式测试","position":"0,-2000","height":300}}
+]

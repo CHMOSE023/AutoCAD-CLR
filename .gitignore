@@ -1,0 +1,8 @@
+bin/
+obj/
+.vs/
+*.user
+*.bak
+*.dwl
+*.dwl2
+test-out/

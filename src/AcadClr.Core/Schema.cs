@@ -1,0 +1,547 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using Newtonsoft.Json.Linq;
+
+namespace AcadClr.Core
+{
+    [Flags]
+    public enum Verbs
+    {
+        None = 0,
+        Add = 1,
+        Set = 2,
+        Get = 4,
+        AddSet = Add | Set,
+        All = Add | Set | Get,
+    }
+
+    public sealed class PropDef
+    {
+        public string Name { get; }
+        public string Kind { get; }
+        public Verbs Verbs { get; }
+        public bool Required { get; }
+        public string Description { get; }
+        public string? Example { get; }
+
+        public PropDef(string name, string kind, Verbs verbs, string description, string? example = null, bool required = false)
+        {
+            Name = name; Kind = kind; Verbs = verbs; Description = description; Example = example; Required = required;
+        }
+    }
+
+    public sealed class ActionDef
+    {
+        public string Name { get; }
+        public string Description { get; }
+        public string Target { get; }
+
+        /// <summary>true：通过 AutoCAD 交互命令实现，不能在事务 / batch 中执行。</summary>
+        public bool UsesCommand { get; }
+
+        public List<PropDef> Props { get; }
+        public string[] Examples { get; }
+
+        public ActionDef(string name, string description, string target, bool usesCommand, IEnumerable<PropDef> props, params string[] examples)
+        {
+            Name = name; Description = description; Target = target; UsesCommand = usesCommand; Props = props.ToList(); Examples = examples;
+        }
+
+        public PropDef CheckProp(string prop)
+        {
+            var def = Props.FirstOrDefault(p => string.Equals(p.Name, prop, StringComparison.OrdinalIgnoreCase));
+            if (def != null) return def;
+            var near = Schema.Suggest(prop, Props.Select(p => p.Name));
+            throw new CliError("unsupported_property", $"edit {Name} 没有属性 “{prop}”。",
+                (near != null ? $"是否想用 {near}？" : "") + $"运行 acadclr help edit {Name} 查看。");
+        }
+    }
+
+    public sealed class TypeDef
+    {
+        public string Name { get; }
+        public string Parent { get; }
+        public string Description { get; }
+        public bool IsEntity { get; }
+        public List<PropDef> Props { get; }
+        public string[] Examples { get; }
+
+        public TypeDef(string name, string parent, string description, bool isEntity, IEnumerable<PropDef> props, params string[] examples)
+        {
+            Name = name; Parent = parent; Description = description; IsEntity = isEntity; Props = props.ToList(); Examples = examples;
+        }
+
+        public PropDef? Find(string prop) =>
+            Props.FirstOrDefault(p => string.Equals(p.Name, prop, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// 元素类型与属性的唯一定义处。CLI 的 help 与插件的属性校验都读这里，保证两边一致。
+    /// </summary>
+    public static class Schema
+    {
+        private static PropDef P(string n, string k, Verbs v, string d, string? ex = null, bool req = false) => new PropDef(n, k, v, d, ex, req);
+
+        /// <summary>所有实体共有的属性。</summary>
+        public static readonly PropDef[] CommonEntityProps =
+        {
+            P("handle", "string", Verbs.Get, "实体句柄（十六进制），跨增删保持稳定"),
+            P("layer", "string", Verbs.All, "所在图层；图层不存在时自动创建", "layer=WALL"),
+            P("color", "color", Verbs.All, "颜色：bylayer / byblock / 1-255 / red…white / #RRGGBB / r,g,b", "color=1"),
+            P("linetype", "string", Verbs.All, "线型名；未加载时自动从 acadiso.lin 加载", "linetype=CENTER"),
+            P("lineWeight", "lineweight", Verbs.All, "线宽（毫米，就近取标准档）或 bylayer / byblock / default", "lineWeight=0.35"),
+            P("bbox", "points", Verbs.Get, "包围盒 minX,minY;maxX,maxY"),
+            P("move", "vector", Verbs.AddSet, "平移 dx,dy[,dz]（在其他属性之后执行）", "move=1000,0"),
+            P("rotate", "angle", Verbs.AddSet, "绕 base 旋转（度，逆时针为正）", "rotate=90"),
+            P("scale", "number", Verbs.AddSet, "绕 base 等比缩放", "scale=2"),
+            P("base", "point", Verbs.AddSet, "rotate / scale 的基点；缺省为实体包围盒中心", "base=0,0"),
+        };
+
+        private static TypeDef Entity(string name, string desc, PropDef[] own, params string[] examples) =>
+            new TypeDef(name, "/model", desc, true, own.Concat(CommonEntityProps), examples);
+
+        public static readonly List<TypeDef> Types = new List<TypeDef>
+        {
+            Entity("line", "直线", new[]
+            {
+                P("start", "point", Verbs.All, "起点", "start=0,0", true),
+                P("end", "point", Verbs.All, "终点", "end=5000,0", true),
+                P("length", "number", Verbs.Get, "长度"),
+                P("angle", "angle", Verbs.Get, "方向角（度）"),
+            }, "acadclr add /model --type line --prop start=0,0 --prop end=5000,0 --prop layer=WALL"),
+
+            Entity("circle", "圆", new[]
+            {
+                P("center", "point", Verbs.All, "圆心", "center=0,0", true),
+                P("radius", "number", Verbs.All, "半径", "radius=500", true),
+                P("diameter", "number", Verbs.Get, "直径"),
+                P("area", "number", Verbs.Get, "面积"),
+            }, "acadclr add /model --type circle --prop center=0,0 --prop radius=500"),
+
+            Entity("arc", "圆弧（从 startAngle 逆时针到 endAngle）", new[]
+            {
+                P("center", "point", Verbs.All, "圆心", "center=0,0", true),
+                P("radius", "number", Verbs.All, "半径", "radius=500", true),
+                P("startAngle", "angle", Verbs.All, "起始角（度）", "startAngle=0", true),
+                P("endAngle", "angle", Verbs.All, "终止角（度）", "endAngle=90", true),
+                P("length", "number", Verbs.Get, "弧长"),
+            }, "acadclr add /model --type arc --prop center=0,0 --prop radius=500 --prop startAngle=0 --prop endAngle=90"),
+
+            Entity("polyline", "轻量多段线（LWPOLYLINE）", new[]
+            {
+                P("points", "points", Verbs.All, "顶点列表 x,y;x,y;…", "points=0,0;5000,0;5000,3000;0,3000", true),
+                P("closed", "bool", Verbs.All, "是否闭合", "closed=true"),
+                P("width", "number", Verbs.All, "全局宽度", "width=0"),
+                P("count", "number", Verbs.Get, "顶点数"),
+                P("length", "number", Verbs.Get, "总长"),
+                P("area", "number", Verbs.Get, "面积（闭合时）"),
+            }, "acadclr add /model --type polyline --prop points=\"0,0;5000,0;5000,3000;0,3000\" --prop closed=true"),
+
+            Entity("text", "单行文字（TEXT）", new[]
+            {
+                P("text", "string", Verbs.All, "文字内容", "text=客厅", true),
+                P("position", "point", Verbs.All, "插入点（justify 非 left 时为对齐点）", "position=0,0", true),
+                P("height", "number", Verbs.All, "字高；缺省取 TEXTSIZE", "height=350"),
+                P("rotation", "angle", Verbs.All, "旋转角（度）", "rotation=0"),
+                P("style", "string", Verbs.All, "文字样式名", "style=Standard"),
+                P("justify", "justify", Verbs.All, "对齐：left center right ml mc mr tl tc tr bl bc br", "justify=mc"),
+            }, "acadclr add /model --type text --prop text=客厅 --prop position=2500,1500 --prop height=350 --prop justify=mc"),
+
+            Entity("mtext", "多行文字（MTEXT），\\P 换行", new[]
+            {
+                P("text", "string", Verbs.All, "内容（支持 MTEXT 格式码，\\P 换行）", "text=第一行\\P第二行", true),
+                P("position", "point", Verbs.All, "插入点", "position=0,0", true),
+                P("height", "number", Verbs.All, "字高；缺省取 TEXTSIZE", "height=350"),
+                P("width", "number", Verbs.All, "文字框宽度，0 为不换行", "width=3000"),
+                P("rotation", "angle", Verbs.All, "旋转角（度）"),
+                P("style", "string", Verbs.All, "文字样式名"),
+                P("justify", "justify", Verbs.All, "附着点：tl tc tr ml mc mr bl bc br", "justify=tl"),
+            }, "acadclr add /model --type mtext --prop text=\"说明\\P第二行\" --prop position=0,0 --prop height=250 --prop width=4000"),
+
+            Entity("point", "点", new[]
+            {
+                P("position", "point", Verbs.All, "位置", "position=0,0", true),
+            }),
+
+            Entity("insert", "块参照（插入已定义的图块）", new[]
+            {
+                P("name", "string", Verbs.All, "块名（必须已在图中定义）", "name=DOOR", true),
+                P("position", "point", Verbs.All, "插入点", "position=0,0", true),
+                P("scale", "number", Verbs.All, "统一比例（get 时非统一比例返回 x,y,z）", "scale=1"),
+                P("rotation", "angle", Verbs.All, "旋转角（度）", "rotation=0"),
+            }, "acadclr add /model --type insert --prop name=DOOR --prop position=1000,0 --prop layer=DOOR"),
+
+            Entity("ellipse", "椭圆 / 椭圆弧", new[]
+            {
+                P("center", "point", Verbs.All, "中心", "center=0,0", true),
+                P("majorAxis", "vector", Verbs.All, "长轴端点相对中心的向量", "majorAxis=3000,0", true),
+                P("ratio", "number", Verbs.All, "短轴与长轴之比，(0,1]", "ratio=0.5", true),
+                P("startAngle", "angle", Verbs.All, "起始参数角（度），椭圆弧用", "startAngle=0"),
+                P("endAngle", "angle", Verbs.All, "终止参数角（度）", "endAngle=180"),
+                P("length", "number", Verbs.Get, "周长 / 弧长"),
+                P("area", "number", Verbs.Get, "面积（完整椭圆）"),
+            }, "acadclr add /model --type ellipse --prop center=0,0 --prop majorAxis=3000,0 --prop ratio=0.5"),
+
+            Entity("spline", "样条曲线（NURBS）", new[]
+            {
+                P("points", "points", Verbs.Add | Verbs.Get, "拟合点（method=fit，曲线穿过每个点）或控制点（method=cv）", "points=0,0;1000,800;2000,0;3000,600", true),
+                P("method", "string", Verbs.Add | Verbs.Get, "fit（默认）或 cv", "method=fit"),
+                P("closed", "bool", Verbs.Add | Verbs.Get, "是否闭合"),
+                P("degree", "number", Verbs.Add | Verbs.Get, "阶次 1-11，默认 3"),
+                P("fitTolerance", "number", Verbs.Add, "拟合公差，默认 0"),
+                P("startTangent", "vector", Verbs.Add, "起点切向（仅 fit，须与 endTangent 成对）", "startTangent=1,0"),
+                P("endTangent", "vector", Verbs.Add, "终点切向", "endTangent=1,0"),
+                P("length", "number", Verbs.Get, "曲线长度"),
+            }, "acadclr add /model --type spline --prop points=\"0,0;1000,800;2000,0;3000,600\""),
+
+            Entity("xline", "构造线（两端无限）", new[]
+            {
+                P("position", "point", Verbs.All, "通过的点", "position=0,0", true),
+                P("direction", "vector", Verbs.All, "方向", "direction=1,1", true),
+            }),
+
+            Entity("ray", "射线（一端无限）", new[]
+            {
+                P("position", "point", Verbs.All, "起点", "position=0,0", true),
+                P("direction", "vector", Verbs.All, "方向", "direction=1,0", true),
+            }),
+
+            Entity("hatch", "图案填充", new[]
+            {
+                P("boundary", "paths", Verbs.Add, "边界实体（须闭合）：路径或句柄，多个用 ; 分隔", "boundary=8A;8B", true),
+                P("pattern", "string", Verbs.All, "图案名，默认 ANSI31；SOLID 为实心填充", "pattern=AR-CONC"),
+                P("scale", "number", Verbs.All, "图案比例，默认 1", "scale=50"),
+                P("angle", "angle", Verbs.All, "图案角度（度）", "angle=45"),
+                P("associative", "bool", Verbs.Add | Verbs.Get, "是否关联边界，默认 true"),
+                P("area", "number", Verbs.Get, "填充面积"),
+                P("loops", "number", Verbs.Get, "边界环数"),
+            }, "acadclr add /model --type hatch --prop boundary=8A --prop pattern=ANSI31 --prop scale=50"),
+
+            Entity("dimension", "标注。kind：linear 线性 / aligned 对齐 / angular 角度 / radius 半径 / diameter 直径", new[]
+            {
+                P("kind", "string", Verbs.Add | Verbs.Get, "linear / aligned / angular / radius / diameter", "kind=linear", true),
+                P("p1", "point", Verbs.All, "第一点（线性、对齐：尺寸界线原点；角度：第一条边上的点）", "p1=0,0"),
+                P("p2", "point", Verbs.All, "第二点", "p2=6000,0"),
+                P("vertex", "point", Verbs.Add | Verbs.Get, "角度标注的顶点"),
+                P("dimLine", "point", Verbs.All, "尺寸线（或弧、半径文字）经过的点", "dimLine=3000,-800", true),
+                P("target", "path", Verbs.Add, "半径 / 直径标注的圆或圆弧：路径或句柄", "target=8E"),
+                P("rotation", "angle", Verbs.Add | Verbs.Set | Verbs.Get, "线性标注的尺寸线角度，0 水平、90 竖直"),
+                P("text", "string", Verbs.All, "文字替代；空为测量值，<> 代表测量值", "text=<>（墙厚）"),
+                P("style", "string", Verbs.All, "标注样式名", "style=ISO-25"),
+                P("scale", "number", Verbs.All, "全局比例（DIMSCALE 替代），毫米图纸 1:100 常用 100", "scale=100"),
+                P("measurement", "number", Verbs.Get, "测量值（角度为度）"),
+            }, "acadclr add /model --type dimension --prop kind=linear --prop p1=0,0 --prop p2=6000,0 --prop dimLine=3000,-800 --prop scale=100",
+               "acadclr add /model --type dimension --prop kind=radius --prop target=8E --prop dimLine=3500,2500 --prop scale=100"),
+
+            Entity("leader", "引线 + 文字注释", new[]
+            {
+                P("points", "points", Verbs.Add | Verbs.Get, "引线顶点，第一个为箭头端", "points=0,0;500,500;1200,500", true),
+                P("text", "string", Verbs.Add, "注释文字（多行文字，\\P 换行）", "text=C20 混凝土", true),
+                P("height", "number", Verbs.Add, "文字高度；缺省取 TEXTSIZE", "height=250"),
+                P("scale", "number", Verbs.All, "箭头等的全局比例（DIMSCALE 替代），毫米图纸 1:100 常用 100", "scale=100"),
+                P("annotation", "string", Verbs.Get, "注释多行文字的句柄"),
+            }, "acadclr add /model --type leader --prop points=\"0,0;500,500;1200,500\" --prop text=说明 --prop height=250"),
+
+            new TypeDef("layer", "/layers", "图层", false, new[]
+            {
+                P("name", "string", Verbs.All, "图层名（set 即重命名）", "name=WALL", true),
+                P("color", "color", Verbs.All, "颜色（ACI 或真彩色）", "color=1"),
+                P("linetype", "string", Verbs.All, "线型；未加载时自动加载", "linetype=CENTER"),
+                P("lineWeight", "lineweight", Verbs.All, "线宽（毫米）", "lineWeight=0.35"),
+                P("on", "bool", Verbs.All, "是否打开", "on=true"),
+                P("frozen", "bool", Verbs.All, "是否冻结", "frozen=false"),
+                P("locked", "bool", Verbs.All, "是否锁定", "locked=false"),
+                P("plot", "bool", Verbs.All, "是否打印", "plot=true"),
+                P("current", "bool", Verbs.All, "设为当前图层（只能设 true）", "current=true"),
+            }, "acadclr add /layers --type layer --prop name=WALL --prop color=1 --prop lineWeight=0.5",
+               "acadclr set \"/layer[@name=WALL]\" --prop locked=true"),
+
+            new TypeDef("xref", "/xrefs", "外部参照（DWG）。附着 / 重载 / 卸载 / 绑定 / 拆离是数据库级操作，不参与 batch 回滚", false, new[]
+            {
+                P("path", "string", Verbs.All, "参照文件路径；相对路径按当前图形所在目录解析。set 即改路径并重载", "path=D:\\work\\base.dwg", true),
+                P("name", "string", Verbs.All, "参照名（缺省取文件名）；set 即重命名", "name=BASE"),
+                P("overlay", "bool", Verbs.Add | Verbs.Get, "true 为覆盖（overlay），false 为附着（attach）", "overlay=true"),
+                P("position", "point", Verbs.Add, "插入点", "position=0,0"),
+                P("scale", "number", Verbs.Add, "插入比例", "scale=1"),
+                P("rotation", "angle", Verbs.Add, "插入旋转角（度）"),
+                P("layer", "string", Verbs.Add, "插入到的图层", "layer=XREF"),
+                P("loaded", "bool", Verbs.Set | Verbs.Get, "false 卸载，true 重新加载", "loaded=false"),
+                P("reload", "bool", Verbs.Set, "true 立即重载", "reload=true"),
+                P("bind", "string", Verbs.Set, "绑定为本地图块：bind（符号加 $0$ 前缀）或 insert（不加前缀）", "bind=insert"),
+                P("status", "string", Verbs.Get, "resolved / unloaded / unreferenced / filenotfound / unresolved"),
+                P("resolvedPath", "string", Verbs.Get, "实际找到的文件（找不到为空）"),
+                P("inserts", "number", Verbs.Get, "插入次数"),
+                P("insertHandles", "string", Verbs.Get, "各个块参照的句柄"),
+            }, "acadclr add /xrefs --type xref --prop path=D:\\work\\base.dwg --prop layer=XREF",
+               "acadclr get /xrefs",
+               "acadclr set \"/xref[@name=base]\" --prop reload=true",
+               "acadclr set \"xref[status=filenotfound]\" --prop path=D:\\new\\base.dwg",
+               "acadclr remove \"/xref[@name=base]\"    # 拆离"),
+
+            new TypeDef("document", "", "文档本身，路径 /", false, new[]
+            {
+                P("file", "string", Verbs.Get, "文件路径"),
+                P("version", "string", Verbs.Get, "DWG 版本"),
+                P("units", "units", Verbs.Get | Verbs.Set, "图形单位 INSUNITS：mm cm m in ft unitless", "units=mm"),
+                P("currentLayer", "string", Verbs.Get | Verbs.Set, "当前图层", "currentLayer=WALL"),
+                P("layers", "number", Verbs.Get, "图层数"),
+                P("entities", "number", Verbs.Get, "模型空间实体数"),
+            }, "acadclr get /", "acadclr set / --prop units=mm"),
+        };
+
+        // ---------------- edit 动作 ----------------
+
+        private static readonly string TargetsNote = "目标：路径、句柄或选择器；多个路径 / 句柄用 ; 分隔";
+
+        public static readonly List<ActionDef> Actions = new List<ActionDef>
+        {
+            new ActionDef("offset", "偏移曲线（直线、多段线、圆、圆弧、椭圆、样条），生成新曲线", "一条曲线", false, new[]
+            {
+                P("distance", "number", Verbs.Set, "偏移距离", "distance=240", true),
+                P("side", "point", Verbs.Set, "偏移到哪一侧：给该侧的任意一点；缺省按正方向"),
+            }, "acadclr edit offset \"/entity[@handle=8A]\" --prop distance=240 --prop side=100,100"),
+
+            new ActionDef("mirror", "沿轴线镜像", TargetsNote, false, new[]
+            {
+                P("axis", "points", Verbs.Set, "镜像轴上的两点 x1,y1;x2,y2", "axis=0,0;0,1000", true),
+                P("keep", "bool", Verbs.Set, "保留源实体（默认 true：生成镜像副本；false：原地镜像）", "keep=false"),
+            }, "acadclr edit mirror \"polyline[layer=WALL]\" --prop axis=\"6500,0;6500,1000\""),
+
+            new ActionDef("explode", "分解多段线、块参照、标注、填充等，返回分解出的实体", TargetsNote, false, new PropDef[0],
+                "acadclr edit explode \"/entity[@handle=8A]\""),
+
+            new ActionDef("break", "打断曲线：一个点一分为二，两个点删除中间段", "一条曲线", false, new[]
+            {
+                P("at", "points", Verbs.Set, "打断点 x,y 或 x1,y1;x2,y2（自动投影到曲线上）", "at=1000,0;2000,0", true),
+            }, "acadclr edit break \"/entity[@handle=8D]\" --prop at=\"1000,2000;3000,2000\""),
+
+            new ActionDef("join", "把首尾相接或共线的实体合并进第一个", "至少两个实体，第一个为主体", false, new PropDef[0],
+                "acadclr edit join \"8A;8B;8C\""),
+
+            new ActionDef("array", "阵列复制（源实体保留）：给 center 为环形阵列，否则为矩形阵列", TargetsNote, false, new[]
+            {
+                P("rows", "number", Verbs.Set, "矩形：行数（含源），默认 1", "rows=3"),
+                P("cols", "number", Verbs.Set, "矩形：列数（含源），默认 1", "cols=4"),
+                P("rowSpacing", "number", Verbs.Set, "矩形：行距（沿 Y，可为负）", "rowSpacing=8400"),
+                P("colSpacing", "number", Verbs.Set, "矩形：列距（沿 X，可为负）", "colSpacing=8400"),
+                P("angle", "angle", Verbs.Set, "矩形：整个阵列的倾角（度）"),
+                P("center", "point", Verbs.Set, "环形：阵列中心", "center=0,0"),
+                P("count", "number", Verbs.Set, "环形：总份数（含源）", "count=8"),
+                P("fillAngle", "angle", Verbs.Set, "环形：填充角度，默认 360"),
+                P("rotateItems", "bool", Verbs.Set, "环形：每份是否随之旋转，默认 true"),
+            }, "acadclr edit array \"/entity[@handle=8E]\" --prop rows=3 --prop cols=4 --prop rowSpacing=8400 --prop colSpacing=8400",
+               "acadclr edit array \"/entity[@handle=8E]\" --prop center=0,0 --prop count=8"),
+
+            new ActionDef("trim", "修剪（AutoCAD 命令）。要保留的部分由拾取点决定：目标写成 句柄@x,y，拾取点落在要剪掉的那段上",
+                "句柄[@拾取点]，多个用 ; 分隔", true, new[]
+            {
+                P("edges", "paths", Verbs.Set, "剪切边：路径或句柄，多个用 ; 分隔", "edges=8A;8B", true),
+            }, "acadclr edit trim \"8D@13500,2000\" --prop edges=8B"),
+
+            new ActionDef("extend", "延伸到边界（AutoCAD 命令）。目标写成 句柄@x,y，拾取点靠近要延伸的那一端",
+                "句柄[@拾取点]，多个用 ; 分隔", true, new[]
+            {
+                P("boundary", "paths", Verbs.Set, "边界：路径或句柄，多个用 ; 分隔", "boundary=8A", true),
+            }, "acadclr edit extend \"95@0,900\" --prop boundary=8A"),
+
+            new ActionDef("fillet", "两条曲线倒圆角（AutoCAD 命令，半径 0 为直角相接）", "第一条曲线（句柄[@拾取点]）", true, new[]
+            {
+                P("with", "path", Verbs.Set, "第二条曲线（句柄[@拾取点]）", "with=8B", true),
+                P("radius", "number", Verbs.Set, "圆角半径，默认 0", "radius=500"),
+            }, "acadclr edit fillet 8D --prop with=95 --prop radius=300"),
+
+            new ActionDef("chamfer", "两条直线倒角（AutoCAD 命令）", "第一条直线（句柄[@拾取点]）", true, new[]
+            {
+                P("with", "path", Verbs.Set, "第二条直线（句柄[@拾取点]）", "with=8B", true),
+                P("d1", "number", Verbs.Set, "第一条线上的倒角距离，默认 0", "d1=200"),
+                P("d2", "number", Verbs.Set, "第二条线上的倒角距离，默认与 d1 相同", "d2=200"),
+            }, "acadclr edit chamfer 8D --prop with=95 --prop d1=200"),
+        };
+
+        public static ActionDef? FindAction(string name) =>
+            Actions.FirstOrDefault(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase));
+
+        public static string HelpEdit()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("edit —— 对已有实体做几何编辑，返回生成或修改后的实体");
+            sb.AppendLine();
+            sb.AppendLine("用法：acadclr edit <动作> <目标> [--prop key=value ...]");
+            sb.AppendLine("batch：{\"command\":\"edit\",\"action\":\"offset\",\"path\":\"$0\",\"props\":{\"distance\":240}}");
+            sb.AppendLine();
+            foreach (var a in Actions)
+                sb.AppendLine("  " + a.Name.PadRight(9) + (a.UsesCommand ? "[命令] " : "       ") + a.Description);
+            sb.AppendLine();
+            sb.AppendLine("[命令] 表示通过 AutoCAD 命令执行：不能放进 batch；实时模式走命令队列，离线模式由 accoreconsole 打开图纸执行并保存。");
+            sb.AppendLine("详细：acadclr help edit <动作>，例如 acadclr help edit array");
+            return sb.ToString();
+        }
+
+        public static string HelpAction(ActionDef a)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"edit {a.Name} —— {a.Description}");
+            sb.AppendLine("目标：" + a.Target);
+            if (a.UsesCommand) sb.AppendLine("方式：AutoCAD 命令（不能放进 batch）");
+            if (a.Props.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("属性（* 为必填）：");
+                int w = a.Props.Max(p => p.Name.Length) + 2;
+                foreach (var p in a.Props)
+                    sb.AppendLine("  " + (p.Required ? "*" : " ") + p.Name.PadRight(w) + p.Description + (p.Example != null ? "    例：" + p.Example : ""));
+            }
+            if (a.Examples.Length > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("示例：");
+                foreach (var e in a.Examples) sb.AppendLine("  " + e);
+            }
+            return sb.ToString();
+        }
+
+        public static TypeDef? FindType(string name) =>
+            Types.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>不在 Types 里的实体（hatch、dimension…）只支持公共属性。</summary>
+        public static TypeDef GenericEntity(string dxfType) =>
+            new TypeDef(dxfType, "/model", "其他实体（仅支持公共属性）", true, CommonEntityProps);
+
+        public static IEnumerable<string> AddableTypes => Types.Where(t => t.Name != "document").Select(t => t.Name);
+
+        /// <summary>
+        /// 校验属性名与动词是否匹配。未知属性给出最接近的候选；只读属性在 add/set 时报错。
+        /// </summary>
+        public static PropDef CheckProp(TypeDef type, string prop, Verbs verb)
+        {
+            var def = type.Find(prop);
+            if (def == null)
+            {
+                var near = Suggest(prop, type.Props.Where(p => (p.Verbs & verb) != 0).Select(p => p.Name));
+                throw new CliError("unsupported_property", $"{type.Name} 没有属性 “{prop}”。",
+                    (near != null ? $"是否想用 {near}？" : "") + $"运行 acadclr help {type.Name} 查看全部属性。");
+            }
+            if ((def.Verbs & verb) == 0)
+            {
+                var what = verb == Verbs.Add ? "add" : verb == Verbs.Set ? "set" : "get";
+                throw new CliError("unsupported_property", $"{type.Name}.{def.Name} 不能用于 {what}（只读或仅限特定操作）。",
+                    $"运行 acadclr help {type.Name} 查看各属性支持的操作。");
+            }
+            return def;
+        }
+
+        public static string? Suggest(string input, IEnumerable<string> candidates)
+        {
+            string? best = null;
+            int bestD = int.MaxValue;
+            foreach (var c in candidates)
+            {
+                int d = Distance(input.ToLowerInvariant(), c.ToLowerInvariant());
+                if (d < bestD) { bestD = d; best = c; }
+            }
+            return best != null && bestD <= Math.Max(2, input.Length / 3) ? best : null;
+        }
+
+        private static int Distance(string a, string b)
+        {
+            var d = new int[a.Length + 1, b.Length + 1];
+            for (int i = 0; i <= a.Length; i++) d[i, 0] = i;
+            for (int j = 0; j <= b.Length; j++) d[0, j] = j;
+            for (int i = 1; i <= a.Length; i++)
+                for (int j = 1; j <= b.Length; j++)
+                    d[i, j] = Math.Min(Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1), d[i - 1, j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1));
+            return d[a.Length, b.Length];
+        }
+
+        // ---------------- help 输出 ----------------
+
+        public static string HelpOverview()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("acadclr —— 面向 AI 智能体的 AutoCAD 命令行工具");
+            sb.AppendLine();
+            sb.AppendLine("用法：acadclr <命令> [参数] [--prop key=value ...] [--json]");
+            sb.AppendLine();
+            sb.AppendLine("命令：");
+            sb.AppendLine("  status                         连接状态与当前图形信息");
+            sb.AppendLine("  get <path> [--depth N]         读取元素（及子元素）");
+            sb.AppendLine("  query <selector>               按选择器查找，如 line[layer=WALL][length>=3000]");
+            sb.AppendLine("  add <parent> --type T          添加元素；--from <path> 克隆已有实体");
+            sb.AppendLine("  set <path|selector>            修改属性（含 move / rotate / scale）");
+            sb.AppendLine("  remove <path|selector>         删除（一次超过 30 个需 --force）");
+            sb.AppendLine("  edit <动作> <目标>             偏移 镜像 分解 打断 合并 阵列 修剪 延伸 倒圆角 倒角");
+            sb.AppendLine("  batch                          批量执行 JSON（--input 文件 / --commands 字符串 / 标准输入）");
+            sb.AppendLine("  stats                          按类型、图层统计实体，给出图形范围");
+            sb.AppendLine("  lisp \"<expr>\" | --file f.lsp   执行 AutoLISP 并返回值（--cmd 走命令队列，离线加 --save 保存）");
+            sb.AppendLine("  script f.scr | --text \"...\"    执行脚本；离线可对多个 --dwg（支持通配符）批量运行");
+            sb.AppendLine("  save [--as path]               保存（实时模式）");
+            sb.AppendLine("  create <file.dwg>              新建空白 DWG（离线）");
+            sb.AppendLine("  instances                      列出加载了插件的 AutoCAD 实例");
+            sb.AppendLine("  help [type]                    查看类型与属性");
+            sb.AppendLine();
+            sb.AppendLine("两种模式：");
+            sb.AppendLine("  实时模式（默认）   操作已打开的 AutoCAD（需先 NETLOAD AcadClr.Plugin.dll）");
+            sb.AppendLine("  离线模式 --dwg F   通过 accoreconsole 直接读写 DWG 文件，无需打开 AutoCAD 界面");
+            sb.AppendLine();
+            sb.AppendLine("全局选项：--json  --dwg <file>  --acad <accoreconsole 路径或年份>  --pid <进程号>");
+            sb.AppendLine("          --best-effort  --stop-on-error  --force  --depth N  --limit N  --timeout 秒");
+            sb.AppendLine();
+            sb.AppendLine("路径：/  /model  /model/line[1]  /model/entity[@handle=2A3]  /entity[@handle=2A3]");
+            sb.AppendLine("      /layers  /layer[@name=WALL]  /xrefs  /xref[@name=BASE]");
+            sb.AppendLine("      （索引从 1 开始，[last()] 取最后一个）");
+            sb.AppendLine();
+            sb.AppendLine("类型：" + string.Join("  ", Types.Select(t => t.Name)));
+            sb.AppendLine("      其他实体（hatch、dimension、spline…）可查询，并可改公共属性。");
+            sb.AppendLine();
+            sb.AppendLine("详细：acadclr help <type>，例如 acadclr help line");
+            return sb.ToString();
+        }
+
+        public static string HelpType(TypeDef t)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine($"{t.Name} —— {t.Description}");
+            if (t.Parent.Length > 0) sb.AppendLine($"父路径：{t.Parent}");
+            sb.AppendLine();
+            sb.AppendLine("属性（* 为 add 必填）：");
+            int w = t.Props.Max(p => p.Name.Length) + 2;
+            foreach (var p in t.Props)
+            {
+                var verbs = string.Join("/", new[] { (Verbs.Add, "add"), (Verbs.Set, "set"), (Verbs.Get, "get") }
+                    .Where(v => (p.Verbs & v.Item1) != 0).Select(v => v.Item2));
+                sb.Append("  ").Append((p.Required ? "*" : " ") + p.Name.PadRight(w))
+                  .Append(("[" + verbs + "]").PadRight(16))
+                  .Append(p.Description);
+                if (p.Example != null) sb.Append("    例：" + p.Example);
+                sb.AppendLine();
+            }
+            if (t.Examples.Length > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("示例：");
+                foreach (var e in t.Examples) sb.AppendLine("  " + e);
+            }
+            return sb.ToString();
+        }
+
+        public static JObject HelpJson(TypeDef t) => new JObject
+        {
+            ["type"] = t.Name,
+            ["parent"] = t.Parent,
+            ["description"] = t.Description,
+            ["props"] = new JArray(t.Props.Select(p => new JObject
+            {
+                ["name"] = p.Name,
+                ["kind"] = p.Kind,
+                ["verbs"] = new JArray(new[] { (Verbs.Add, "add"), (Verbs.Set, "set"), (Verbs.Get, "get") }
+                    .Where(v => (p.Verbs & v.Item1) != 0).Select(v => v.Item2)),
+                ["required"] = p.Required,
+                ["description"] = p.Description,
+                ["example"] = p.Example,
+            })),
+            ["examples"] = new JArray(t.Examples),
+        };
+    }
+}

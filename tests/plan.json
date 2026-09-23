@@ -1,0 +1,14 @@
+[
+  {"command":"add","parent":"/layers","type":"layer","props":{"name":"WALL","color":1,"lineWeight":0.5}},
+  {"command":"add","parent":"/layers","type":"layer","props":{"name":"AXIS","color":"red","linetype":"CENTER","lineWeight":0.13}},
+  {"command":"add","parent":"/model","type":"polyline","props":{"points":"0,0;6000,0;6000,4000;0,4000","closed":true,"layer":"WALL"}},
+  {"command":"add","parent":"/model","from":"$2","props":{"move":"7000,0"}},
+  {"command":"set","path":"$3","props":{"color":3}},
+  {"command":"add","parent":"/model","type":"line","props":{"start":"-1000,2000","end":"14000,2000","layer":"AXIS"}},
+  {"command":"add","parent":"/model","type":"circle","props":{"center":"3000,2000","radius":500,"layer":"WALL"}},
+  {"command":"add","parent":"/model","type":"arc","props":{"center":"10000,2000","radius":800,"startAngle":0,"endAngle":180}},
+  {"command":"add","parent":"/model","type":"text","props":{"text":"客厅","position":"3000,3000","height":350,"justify":"mc","layer":"TEXT"}},
+  {"command":"add","parent":"/model","type":"mtext","props":{"text":"说明\\P第二行","position":"0,-500","height":250,"width":4000}},
+  {"command":"add","parent":"/model","type":"point","props":{"position":"100,100"}},
+  {"command":"add","parent":"/model","type":"line","props":{"start":"0,0","end":"1000,0","rotate":90,"base":"0,0"}}
+]

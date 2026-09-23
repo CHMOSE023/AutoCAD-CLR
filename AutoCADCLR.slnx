@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AcadClr.Core/AcadClr.Core.csproj" />
+    <Project Path="src/AcadClr.Plugin/AcadClr.Plugin.csproj" />
+    <Project Path="src/AcadClr.Cli/AcadClr.Cli.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>AcadClr.Plugin</AssemblyName>
+    <RootNamespace>AcadClr.Plugin</RootNamespace>
+    <!-- 把 Newtonsoft.Json 等运行时依赖复制到输出目录；AutoCAD 自身程序集通过 ExcludeAssets 排除 -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- 20.0 = AutoCAD 2015 API，与 AutoCADMCP 相同；2014（R19.1）也能加载，前提是不调用 2015 新增的 API -->
+    <PackageReference Include="AutoCAD.NET" Version="20.0.0" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AcadClr.Core\AcadClr.Core.csproj" />
+  </ItemGroup>
+</Project>
