@@ -136,6 +136,32 @@ acadclr stats plan.dwg
 - 执行方式默认是原子的：每条操作都会执行并报告结果，只要有一条失败，就回滚整批操作。
 - `--best-effort` 保留成功的部分；`--stop-on-error` 遇到第一个失败就停止。
 
+## 布局、视口与打印
+
+```bash
+acadclr get /layouts                                          # 布局列表：设备、纸张、方向、视口数、当前布局
+acadclr add /layouts --type layout --prop name=A3 --prop device="DWG To PDF.pc3" --prop paper=full_bleed_A3 --prop landscape=true
+acadclr add "/layout[@name=A3]" --type polyline --prop points="10,10;410,10;410,287;10,287" --prop closed=true   # 图纸空间的图框
+acadclr add "/layout[@name=A3]" --type viewport --prop center=210,150 --prop width=380 --prop height=250 \
+        --prop viewCenter=15000,10000 --prop scale=100 --prop locked=true                                         # 1:100 视口
+acadclr set "/layout[@name=A3]" --prop current=true            # 切换当前布局；set 也可改 name / device / paper / landscape / plotStyle
+acadclr remove "/layout[@name=布局2]"
+acadclr get /devices                                          # 打印设备；get "/device[@name=DWG To PDF.pc3]" 查看纸张
+acadclr plot "/layout[@name=A3]" --prop output=D:/out/A3.pdf  # 打印布局
+acadclr plot plan.dwg Model --prop area=extents --prop paper=A3 --prop landscape=true --prop mono=true
+```
+
+- **实体画在哪个空间，由父路径决定**：`/model` 是模型空间，`/layout[@name=X]` 是该布局的图纸空间。图纸空间实体的路径形如
+  `/layout[@name=A3]/line[@handle=..]`，查询时用 `[space=A3]` 过滤（默认只查模型空间）。
+  AutoCADMCP 依赖"当前空间"这种隐式状态，曾出现过"以为画在布局上，其实进了模型空间"的问题，这里不会发生。
+- 纸张可以写全名（`ISO_A3_(420.00_x_297.00_MM)`），也可以写简称（`A3`、`full_bleed_A3`），方向由 `landscape` 决定。
+  布局的原点在可打印区域的左下角，贴边的图框请用 `full_bleed` 纸张，否则会被页边距裁掉。
+- 打印范围只支持 `layout` 和 `extents`。window、display、limits 在 AutoCAD 2014 的打印引擎上打不出内容（AutoCADMCP 实测）。
+  只出局部时，建一个布局，用视口框定范围。
+- 新建 / 删除 / 重命名 / 切换布局、新建视口都是数据库级操作。和外部参照一样，含这类操作的 batch 会逐条执行，不支持回滚。
+- **离线模式**：新建视口和打印需要真正的文档，会自动改用"文档模式"：accoreconsole 用 `/i` 打开图纸，插件直接在该文档上执行，
+  有修改时再按原格式另存。在后台数据库里操作视口会让 accoreconsole 崩溃，实测如此。
+
 ## 外部参照
 
 ```bash
@@ -161,6 +187,8 @@ acadclr lisp plan.dwg --save "(command \"_.CIRCLE\" \"0,0\" 500)"   # 离线：�
 acadclr script fix.scr "D:/drawings/*.dwg" --save        # 离线：对一批图纸逐个运行脚本并保存
 ```
 
+- LISP 结果的编码按 AutoCAD 版本确定：2021 起为 UTF-8，之前为系统 ANSI。不能"先试 UTF-8 再退回"，
+  因为 GBK 编码的中文常常恰好也是合法的 UTF-8（比如"实时"会被解成"ʵʱ"）。
 - 返回值用 `vl-prin1-to-string` 表示，字符串会带引号，便于区分类型。LISP 出错时返回错误码 `lisp_error`，退出码为 1。
 - `.lsp` 与 `.scr` 文件的编码会自动识别（UTF-8 或 GBK）。生成的脚本会按 AutoCAD 版本选择编码：2020 及以前用系统 ANSI，2021 起用 UTF-8。
 - **离线的 `lisp` 和 `script` 不需要加载插件**：它们让 accoreconsole 直接打开 DWG 执行，所以不受 SECURELOAD 限制。
@@ -217,7 +245,6 @@ acadclr add /model --type leader --prop points="0,0;500,500;1200,500" --prop tex
 
 ## 路线图
 
-- 布局 / 视口 / 打印 PDF（第 2 批）
 - 图块定义与列表、系统变量、多文档、单位换算、测量、撤销 / 标记回滚（第 3 批）
 - `view png`：截图反馈
 - `dump`：把现有图纸导出成可重放的 batch JSON

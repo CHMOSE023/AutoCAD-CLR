@@ -33,7 +33,7 @@ namespace AcadClr.Plugin.Engine
 
         /// <param name="resolve">把路径或句柄解析成 ObjectId（填充边界、标注目标用）。</param>
         public static Entity CreateEntity(Database db, Transaction tr, TypeDef type, List<KeyValuePair<string, string>> props,
-            Func<string, ObjectId> resolve)
+            Func<string, ObjectId> resolve, ObjectId space)
         {
             foreach (var kv in props) Schema.CheckProp(type, kv.Key, Verbs.Add);
             var missing = type.Props.Where(p => p.Required && !props.Any(kv => kv.Key.Equals(p.Name, StringComparison.OrdinalIgnoreCase)))
@@ -46,7 +46,7 @@ namespace AcadClr.Plugin.Engine
             {
                 var map = props.ToDictionary(kv => type.Find(kv.Key)!.Name, kv => kv.Value);
                 var consumed = new HashSet<string>();
-                var made = Factory.Create(db, tr, type.Name, map, resolve, consumed);
+                var made = Factory.Create(db, tr, type.Name, map, resolve, consumed, space);
                 ApplyEntity(db, tr, made, type, props.Where(kv => !consumed.Contains(type.Find(kv.Key)!.Name)).ToList(), Verbs.Add);
                 SyncLeaderAnnotation(tr, made);
                 return made;
@@ -81,7 +81,7 @@ namespace AcadClr.Plugin.Engine
             if (e is DBText t0) t0.TextString = "_";
             if (e is MText m0) m0.Contents = "_";
 
-            var ms = (BlockTableRecord)tr.GetObject(Acad.ModelSpace(db), OpenMode.ForWrite);
+            var ms = (BlockTableRecord)tr.GetObject(space, OpenMode.ForWrite);
             ms.AppendEntity(e);
             tr.AddNewlyCreatedDBObject(e, true);
 
@@ -175,6 +175,9 @@ namespace AcadClr.Plugin.Engine
                         break;
                     case DBPoint p:
                         if (key == "position") p.Position = Acad.Pt(key, v);
+                        break;
+                    case Viewport vp:
+                        Layouts.SetViewport(vp, key, v);
                         break;
                     case Ellipse el:
                         SetEllipse(el, key, v);
@@ -316,7 +319,8 @@ namespace AcadClr.Plugin.Engine
         {
             var ids = new ObjectIdCollection { source };
             var map = new IdMapping();
-            db.DeepCloneObjects(ids, Acad.ModelSpace(db), map, false);
+            // 副本放在源实体所在的空间（模型空间或某个布局）
+            db.DeepCloneObjects(ids, tr.GetObject(source, OpenMode.ForRead).OwnerId, map, false);
             return (Entity)tr.GetObject(map[source].Value, OpenMode.ForWrite);
         }
 

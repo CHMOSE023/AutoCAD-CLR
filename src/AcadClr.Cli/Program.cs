@@ -81,6 +81,33 @@ namespace AcadClr.Cli
                 case "config":
                     return ConfigCmd(pos);
 
+                case "plot":
+                {
+                    var props = PropsOf(a);
+                    foreach (var kv in props?.Properties() ?? Enumerable.Empty<JProperty>())
+                        if (!Schema.PlotProps.Any(p => p.Name.Equals(kv.Name, StringComparison.OrdinalIgnoreCase)))
+                            throw new CliError("usage", $"plot 没有属性 “{kv.Name}”。",
+                                (Schema.Suggest(kv.Name, Schema.PlotProps.Select(p => p.Name)) is string n ? $"是否想用 {n}？" : "") + "运行 acadclr help plot");
+                    var plotTarget = pos.FirstOrDefault();
+                    // 布局可以写成名字或路径 /layout[@name=A3]
+                    string? layoutName = plotTarget;
+                    if (plotTarget != null && plotTarget.StartsWith("/", StringComparison.Ordinal))
+                    {
+                        var m = System.Text.RegularExpressions.Regex.Match(plotTarget, @"@name=([^\]]+)\]");
+                        layoutName = m.Success ? m.Groups[1].Value
+                            : plotTarget.Equals("/model", StringComparison.OrdinalIgnoreCase) ? "Model"
+                            : throw new CliError("usage", $"plot 的目标应为布局：{plotTarget}", "例：/layout[@name=A3] 或直接写布局名");
+                    }
+                    var plotResp = dwg != null
+                        ? OfflineTransport.Plot(dwg, layoutName, props, a.Get("--acad"), a.GetInt("--timeout") ?? 300)
+                        : LiveTransport.Send(new Request
+                          {
+                              Kind = "plot",
+                              Items = { new BatchItem { Command = "plot", Path = layoutName == null ? null : $"/layout[@name={layoutName}]", Props = props } },
+                          }, a.GetInt("--pid"));
+                    return Output.Render(plotResp, "plot", json, dwg != null);
+                }
+
                 case "lisp":
                 {
                     var file = a.Get("--file");
@@ -223,7 +250,7 @@ namespace AcadClr.Cli
                     break;
 
                 default:
-                    var near = Schema.Suggest(verb, new[] { "status", "get", "query", "add", "set", "remove", "batch", "stats", "save", "create", "instances", "lisp", "script", "config", "edit", "help" });
+                    var near = Schema.Suggest(verb, new[] { "status", "get", "query", "add", "set", "remove", "batch", "stats", "save", "create", "instances", "lisp", "script", "config", "edit", "plot", "help" });
                     throw new CliError("usage", $"未知命令 “{verb}”。", (near != null ? $"是否想用 {near}？" : "") + "运行 acadclr help 查看全部命令");
             }
 
@@ -285,6 +312,7 @@ namespace AcadClr.Cli
         private static int Help(List<string> pos, bool json)
         {
             if (pos.Count == 0) { Console.Write(Schema.HelpOverview()); return 0; }
+            if (pos[0].Equals("plot", StringComparison.OrdinalIgnoreCase)) { Console.Write(Schema.HelpPlot()); return 0; }
             if (pos[0].Equals("edit", StringComparison.OrdinalIgnoreCase))
             {
                 if (pos.Count == 1) { Console.Write(Schema.HelpEdit()); return 0; }

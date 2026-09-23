@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security;
 using System.Threading;
@@ -94,7 +95,11 @@ namespace AcadClr.Plugin.Host
             CoreApp.DocumentManager.MdiActiveDocument
             ?? throw new CliError("no_document", "AutoCAD 当前没有打开的图形。");
 
-        private static Response ReadResult(string outFile) => LispWrap.Parse(File.ReadAllBytes(outFile));
+        private static Response ReadResult(string outFile) => LispWrap.Parse(File.ReadAllBytes(outFile), LispIsUtf8);
+
+        /// <summary>ACADVER 主版本 24 起（AutoCAD 2021）AutoLISP 为 Unicode，结果文件是 UTF-8；之前为系统 ANSI。</summary>
+        private static bool LispIsUtf8 =>
+            int.TryParse(new string(Convert.ToString(CoreApp.GetSystemVariable("ACADVER")).TakeWhile(char.IsDigit).ToArray()), out int major) && major >= 24;
 
         private static string Wrap(string code, string outFile) => LispWrap.Wrap(code, outFile);
 

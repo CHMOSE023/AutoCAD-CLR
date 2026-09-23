@@ -40,22 +40,32 @@ namespace AcadClr.Plugin.Engine
         public Response Run(Request req) =>
             req.Items.Any(i => IsDirect(i, req.Items, 0)) ? RunSequential(req) : RunAtomic(req);
 
+        private static readonly HashSet<string> DirectAddTypes =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "xref", "layout", "viewport" };
+
+        /// <summary>“/layout[@name=X]” 或 “/layouts/layout[...]” 本身（不含其下的实体路径）。</summary>
+        private static readonly System.Text.RegularExpressions.Regex LayoutItself =
+            new System.Text.RegularExpressions.Regex(@"^/(layouts/)?layout\[[^\]]*\]$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
         /// <summary>
-        /// 外部参照的写操作（附着 / 重载 / 卸载 / 绑定 / 拆离）是数据库级操作，不能放进事务。
+        /// 数据库级操作不能放进事务：外部参照（附着 / 重载 / 卸载 / 绑定 / 拆离）、
+        /// 布局（新建 / 删除 / 重命名 / 切换）、新建视口（要临时切换当前布局）。
         /// 含这类操作的批次改为逐条执行：普通操作各自一个事务立即提交，失败不回滚已成功的部分。
         /// </summary>
         private static bool IsDirect(BatchItem item, List<BatchItem> all, int depth)
         {
-            if (item.Verb == "add") return string.Equals(item.Type?.Trim(), "xref", StringComparison.OrdinalIgnoreCase);
+            if (item.Verb == "add") return item.From == null && DirectAddTypes.Contains(item.Type?.Trim() ?? "");
             if (item.Verb != "set" && item.Verb != "remove") return false;
 
             var target = (item.Path ?? item.Selector ?? "").Trim();
             if (target.StartsWith("$", StringComparison.Ordinal) && depth < 8 &&
                 int.TryParse(target.Substring(1), NumberStyles.Integer, CultureInfo.InvariantCulture, out int k) &&
                 k >= 0 && k < all.Count)
-                return all[k].Verb == "add" && IsDirect(all[k], all, depth + 1);
+                return all[k].Verb == "add" && (all[k].Type ?? "").Trim().ToLowerInvariant() != "viewport" && IsDirect(all[k], all, depth + 1);
             return target.StartsWith("/xref[", StringComparison.OrdinalIgnoreCase) ||
-                   target.StartsWith("xref", StringComparison.OrdinalIgnoreCase);
+                   target.StartsWith("xref", StringComparison.OrdinalIgnoreCase) ||
+                   LayoutItself.IsMatch(target) ||
+                   target.StartsWith("layout[", StringComparison.OrdinalIgnoreCase);
         }
 
         private Response RunSequential(Request req)
@@ -76,7 +86,7 @@ namespace AcadClr.Plugin.Engine
                 var r = new ItemResult { Index = i, Op = item.Verb };
                 try
                 {
-                    if (IsDirect(item, req.Items, 0)) ExecuteXref(item, r, results);
+                    if (IsDirect(item, req.Items, 0)) ExecuteDirect(item, r, results);
                     else
                     {
                         using (var tr = tm.StartTransaction())
@@ -109,15 +119,43 @@ namespace AcadClr.Plugin.Engine
             };
         }
 
-        private void ExecuteXref(BatchItem item, ItemResult r, List<ItemResult> prior)
+        /// <summary>在没有打开事务的情况下执行外部参照、布局、新建视口等数据库级操作。</summary>
+        private void ExecuteDirect(BatchItem item, ItemResult r, List<ItemResult> prior)
         {
             if (item.Verb == "add")
             {
-                var parent = Ref(item.Parent ?? item.Path ?? "/xrefs", prior, "parent");
-                if (!parent.Equals("/xrefs", StringComparison.OrdinalIgnoreCase) && parent != "/")
-                    throw new CliError("invalid_path", "外部参照的父路径应为 /xrefs。");
-                Done(r, Xrefs.Attach(_db, item.GetProps()));
-                return;
+                var type = (item.Type ?? "").Trim().ToLowerInvariant();
+                var parentPath = Ref(item.Parent ?? item.Path ?? (type == "xref" ? "/xrefs" : "/layouts"), prior, "parent");
+                switch (type)
+                {
+                    case "xref":
+                        if (!parentPath.Equals("/xrefs", StringComparison.OrdinalIgnoreCase) && parentPath != "/")
+                            throw new CliError("invalid_path", "外部参照的父路径应为 /xrefs。");
+                        Done(r, Xrefs.Attach(_db, item.GetProps()));
+                        return;
+                    case "layout":
+                        if (!parentPath.Equals("/layouts", StringComparison.OrdinalIgnoreCase) && parentPath != "/")
+                            throw new CliError("invalid_path", "布局的父路径应为 /layouts。");
+                        Done(r, Layouts.Create(_db, item.GetProps()));
+                        return;
+                    default: // viewport
+                        Target parent;
+                        using (var tr = _db.TransactionManager.StartTransaction())
+                        {
+                            _tr = tr;
+                            parent = Resolve(parentPath);
+                            tr.Commit();
+                        }
+                        if (parent.Kind != TargetKind.Layout)
+                            throw new CliError("invalid_path", "视口的父路径应为布局，例如 /layout[@name=A3]。");
+                        var vtype = Schema.FindType("viewport")!;
+                        Done(r, Layouts.AddViewport(_db, parent.Id, item.GetProps(), (tr, e, rest) =>
+                        {
+                            Mutate.ApplyEntity(_db, tr, e, vtype, rest, Verbs.Add);
+                            return Nodes.Entity(tr, e);
+                        }));
+                        return;
+                }
             }
 
             // 先在只读事务里解析目标，事务关闭后再做数据库级操作
@@ -128,25 +166,35 @@ namespace AcadClr.Plugin.Engine
                 targets = Targets(item, prior, item.Verb, r);
                 tr.Commit();
             }
-            if (targets.Any(t => t.Kind != TargetKind.Xref))
-                throw new CliError("invalid_path", "目标不是外部参照。");
+            if (targets.Any(t => t.Kind != TargetKind.Xref && t.Kind != TargetKind.Layout))
+                throw new CliError("invalid_path", "目标不是外部参照或布局。");
 
             if (item.Verb == "set")
             {
                 var props = item.GetProps();
-                if (props.Count == 0) throw new CliError("invalid_request", "set 没有要修改的属性。", "例：--prop reload=true");
-                foreach (var t in targets) Collect(r, Xrefs.Apply(_db, t.Id, props));
+                if (props.Count == 0) throw new CliError("invalid_request", "set 没有要修改的属性。");
+                foreach (var t in targets)
+                    Collect(r, t.Kind == TargetKind.Xref ? Xrefs.Apply(_db, t.Id, props) : Layouts.Apply(_db, t.Id, props));
                 return;
             }
 
             if (targets.Count > RemoveGuard && item.Force != true)
-                throw new CliError("too_many", $"将拆离 {targets.Count} 个外部参照，超过保护阈值 {RemoveGuard}。", "确认无误后加 --force");
+                throw new CliError("too_many", $"将删除 {targets.Count} 个外部参照 / 布局，超过保护阈值 {RemoveGuard}。", "确认无误后加 --force");
             var removed = new List<Node>();
             foreach (var t in targets)
             {
-                var n = Xrefs.NodeById(_db, t.Id);
-                Xrefs.Detach(_db, t.Id);
-                removed.Add(new Node { Path = n.Path, Type = "xref" });
+                if (t.Kind == TargetKind.Xref)
+                {
+                    var n = Xrefs.NodeById(_db, t.Id);
+                    Xrefs.Detach(_db, t.Id);
+                    removed.Add(new Node { Path = n.Path, Type = "xref" });
+                }
+                else
+                {
+                    var n = Layouts.NodeById(_db, t.Id);
+                    Layouts.Delete(_db, t.Id);
+                    removed.Add(new Node { Path = n.Path, Type = "layout" });
+                }
             }
             if (r.Matched == null && removed.Count == 1) r.Path = removed[0].Path;
             else r.Nodes = removed;
@@ -274,6 +322,29 @@ namespace AcadClr.Plugin.Engine
                 case TargetKind.Xref:
                     node = Xrefs.Node(_db, _tr, (BlockTableRecord)_tr.GetObject(t.Id, OpenMode.ForRead));
                     break;
+                case TargetKind.Layouts:
+                    var ls = Layouts.All(_db, _tr);
+                    node = new Node { Path = "/layouts", Type = "layouts", Props = { ["count"] = ls.Count.ToString(), ["current"] = Layouts.CurrentName() } };
+                    if ((item.Depth ?? 1) >= 1) node.Children = ls.Select(l => Layouts.Node(_db, _tr, l)).ToList();
+                    break;
+                case TargetKind.Layout:
+                    var lay = (Layout)_tr.GetObject(t.Id, OpenMode.ForRead);
+                    node = Layouts.Node(_db, _tr, lay);
+                    if ((item.Depth ?? 1) >= 1)
+                    {
+                        var ids = Layouts.SpaceEntityIds(_db, _tr, lay.BlockTableRecordId).ToList();
+                        node.Children = ids.Take(limit).Select(id => Nodes.Entity(_tr, (Entity)_tr.GetObject(id, OpenMode.ForRead))).ToList();
+                        if (ids.Count > limit) node.ChildCount = ids.Count;
+                    }
+                    break;
+                case TargetKind.Devices:
+                    var devs = PageSetup.Devices();
+                    node = new Node { Path = "/devices", Type = "devices", Props = { ["count"] = devs.Count.ToString() } };
+                    node.Children = devs.Select(d => PageSetup.DeviceNode(d, false)).ToList();
+                    break;
+                case TargetKind.Device:
+                    node = PageSetup.DeviceNode(t.Name!, true);
+                    break;
                 default:
                     node = Nodes.Entity(_tr, (Entity)_tr.GetObject(t.Id, OpenMode.ForRead));
                     break;
@@ -342,19 +413,36 @@ namespace AcadClr.Plugin.Engine
                 return list;
             }
 
-            foreach (var id in Nodes.ModelEntityIds(_db, _tr))
+            if (sel.Type == "layout")
             {
-                var e = (Entity)_tr.GetObject(id, OpenMode.ForRead);
-                if (!sel.MatchesType(Nodes.TypeOf(e))) continue;
-                var n = Nodes.Entity(_tr, e);
-                if (sel.Matches(n.Type, a => Prop(n, a))) list.Add(n);
+                foreach (var l in Layouts.All(_db, _tr))
+                {
+                    var n = Layouts.Node(_db, _tr, l);
+                    if (sel.Matches(n.Type, a => Prop(n, a))) list.Add(n);
+                }
+                return list;
             }
+
+            // 默认只查模型空间；条件里提到 space，或查的是视口时，扫描所有布局
+            bool allSpaces = sel.Type == "viewport" || sel.Conditions.Any(c => c.Attr == "space");
+            var spaces = allSpaces
+                ? Layouts.All(_db, _tr).Select(l => l.BlockTableRecordId).ToList()
+                : new List<ObjectId> { Acad.ModelSpace(_db) };
+            foreach (var space in spaces)
+                foreach (var id in Layouts.SpaceEntityIds(_db, _tr, space))
+                {
+                    var e = (Entity)_tr.GetObject(id, OpenMode.ForRead);
+                    if (!sel.MatchesType(Nodes.TypeOf(e))) continue;
+                    var n = Nodes.Entity(_tr, e);
+                    if (sel.Matches(n.Type, a => Prop(n, a))) list.Add(n);
+                }
             return list;
         }
 
         private static string? Prop(Node n, string attr)
         {
             if (attr == "type") return n.Type;
+            if (attr == "space" && !n.Props.ContainsKey("space") && n.Path.StartsWith("/model/", StringComparison.Ordinal)) return Layouts.ModelName;
             foreach (var kv in n.Props)
                 if (string.Equals(kv.Key, attr, StringComparison.OrdinalIgnoreCase)) return kv.Value;
             return null;
@@ -398,9 +486,15 @@ namespace AcadClr.Plugin.Engine
                 return;
             }
 
-            if (parent.Kind != TargetKind.Model && parent.Kind != TargetKind.Document)
-                throw new CliError("invalid_path", $"实体的父路径应为 /model，收到 {parentPath}。");
-            Done(r, Nodes.Entity(_tr, Mutate.CreateEntity(_db, _tr, type, props, s => EntityRef(s, prior))));
+            if (!type.IsEntity || type.Name == "viewport")
+                throw new CliError("invalid_request", $"{type.Name} 不能在这里添加。", $"父路径应为 {type.Parent}");
+
+            // 实体落在哪个空间完全由父路径决定：/model 为模型空间，/layout[@name=X] 为该布局的图纸空间
+            ObjectId space;
+            if (parent.Kind == TargetKind.Model || parent.Kind == TargetKind.Document) space = Acad.ModelSpace(_db);
+            else if (parent.Kind == TargetKind.Layout) space = ((Layout)_tr.GetObject(parent.Id, OpenMode.ForRead)).BlockTableRecordId;
+            else throw new CliError("invalid_path", $"实体的父路径应为 /model 或 /layout[@name=...]，收到 {parentPath}。");
+            Done(r, Nodes.Entity(_tr, Mutate.CreateEntity(_db, _tr, type, props, s => EntityRef(s, prior), space)));
         }
 
         // ------------------------------------------------------------------ edit
@@ -524,7 +618,7 @@ namespace AcadClr.Plugin.Engine
                 {
                     case TargetKind.Entity:
                         var e = (Entity)_tr.GetObject(t.Id, OpenMode.ForWrite);
-                        removed.Add(new Node { Path = Nodes.EntityPath(Nodes.TypeOf(e), e), Type = Nodes.TypeOf(e) });
+                        removed.Add(new Node { Path = Nodes.EntityPath(_tr, Nodes.TypeOf(e), e), Type = Nodes.TypeOf(e) });
                         e.Erase();
                         break;
                     case TargetKind.Layer:
@@ -606,13 +700,14 @@ namespace AcadClr.Plugin.Engine
 
         // ------------------------------------------------------------------ 路径解析
 
-        private enum TargetKind { Document, Model, Layers, Layer, Entity, Xrefs, Xref }
+        private enum TargetKind { Document, Model, Layers, Layer, Entity, Xrefs, Xref, Layouts, Layout, Devices, Device }
 
         private readonly struct Target
         {
             public readonly TargetKind Kind;
             public readonly ObjectId Id;
-            public Target(TargetKind kind, ObjectId id) { Kind = kind; Id = id; }
+            public readonly string? Name;
+            public Target(TargetKind kind, ObjectId id, string? name = null) { Kind = kind; Id = id; Name = name; }
         }
 
         /// <summary>把 "$3" 替换为第 3 条操作（0 起）返回的路径。</summary>
@@ -657,9 +752,67 @@ namespace AcadClr.Plugin.Engine
                 case "xref":
                     if (segs.Count == 1) return new Target(TargetKind.Xref, ResolveXref(head, path));
                     break;
+                case "layouts":
+                    if (segs.Count == 1) return new Target(TargetKind.Layouts, ObjectId.Null);
+                    if (segs[1].Name != "layout") break;
+                    return ResolveInLayout(segs.Skip(1).ToList(), path);
+                case "layout":
+                    return ResolveInLayout(segs, path);
+                case "devices":
+                    if (segs.Count == 1) return new Target(TargetKind.Devices, ObjectId.Null);
+                    if (segs.Count == 2 && segs[1].Name == "device") return ResolveDevice(segs[1], path);
+                    break;
+                case "device":
+                    if (segs.Count == 1) return ResolveDevice(head, path);
+                    break;
             }
             throw new CliError("invalid_path", $"无法识别的路径：{path}",
-                "可用：/  /model  /model/<type>[N]  /model/entity[@handle=H]  /entity[@handle=H]  /layers  /layer[@name=N]  /xrefs  /xref[@name=N]");
+                "可用：/  /model  /model/<type>[N]  /entity[@handle=H]  /layers  /layer[@name=N]  /xrefs  /xref[@name=N]  " +
+                "/layouts  /layout[@name=N]  /layout[@name=N]/<type>[N]  /devices  /device[@name=N]");
+        }
+
+        /// <summary>/layout[@name=X] 或 /layout[@name=X]/&lt;type&gt;[N|@handle=H]。</summary>
+        private Target ResolveInLayout(List<PathSegment> segs, string whole)
+        {
+            var seg = segs[0];
+            var all = Layouts.All(_db, _tr);
+            Layout? lay = null;
+            if (seg.AttrName == "name")
+            {
+                var id = Layouts.Find(_db, _tr, seg.AttrValue ?? "");
+                if (!id.IsNull) lay = (Layout)_tr.GetObject(id, OpenMode.ForRead);
+                else
+                {
+                    var near = Schema.Suggest(seg.AttrValue ?? "", all.Select(l => l.LayoutName));
+                    throw new CliError("not_found", $"布局 “{seg.AttrValue}” 不存在。",
+                        (near != null ? $"是否想用 {near}？" : "") + "现有：" + string.Join("、", all.Select(l => l.LayoutName)));
+                }
+            }
+            else if (seg.Index != null)
+            {
+                int idx = seg.Index == -1 ? all.Count : seg.Index.Value;
+                if (idx < 1 || idx > all.Count) throw new CliError("not_found", $"{whole}：只有 {all.Count} 个布局（含 Model）。");
+                lay = all[idx - 1];
+            }
+            else throw new CliError("invalid_path", $"布局需要用 [@name=...] 或 [N] 定位：{whole}");
+
+            if (segs.Count == 1) return new Target(TargetKind.Layout, lay.ObjectId);
+            if (segs.Count == 2)
+            {
+                var id = ResolveEntity(segs[1], whole, lay.BlockTableRecordId);
+                // 按句柄定位时核对实体确实在这个布局里，免得路径与实际空间不符
+                var e = (Entity)_tr.GetObject(id, OpenMode.ForRead);
+                if (e.OwnerId != lay.BlockTableRecordId)
+                    throw new CliError("not_found", $"{whole}：该实体不在布局 “{lay.LayoutName}” 中。", "它的实际路径是 " + Nodes.EntityPath(_tr, Nodes.TypeOf(e), e));
+                return new Target(TargetKind.Entity, id);
+            }
+            throw new CliError("invalid_path", $"无法识别的路径：{whole}");
+        }
+
+        private static Target ResolveDevice(PathSegment seg, string whole)
+        {
+            if (seg.AttrName != "name") throw new CliError("invalid_path", $"设备需要用 [@name=...] 定位：{whole}");
+            return new Target(TargetKind.Device, ObjectId.Null, PageSetup.EnsureDevice(seg.AttrValue ?? ""));
         }
 
         private ObjectId ResolveXref(PathSegment seg, string whole)
@@ -681,7 +834,8 @@ namespace AcadClr.Plugin.Engine
             throw new CliError("invalid_path", $"外部参照需要用 [N] 或 [@name=...] 定位：{whole}");
         }
 
-        private ObjectId ResolveEntity(PathSegment seg, string whole)
+        /// <param name="space">按序号定位时在哪个空间里数（null 为模型空间）；按句柄定位时不限空间。</param>
+        private ObjectId ResolveEntity(PathSegment seg, string whole, ObjectId? space = null)
         {
             string type = seg.Name;
 
@@ -702,12 +856,12 @@ namespace AcadClr.Plugin.Engine
 
             if (seg.Index != null)
             {
-                var ids = Nodes.ModelEntityIds(_db, _tr)
+                var ids = Layouts.SpaceEntityIds(_db, _tr, space ?? Acad.ModelSpace(_db))
                     .Where(id => type == "entity" || Nodes.TypeOf((Entity)_tr.GetObject(id, OpenMode.ForRead)) == type)
                     .ToList();
                 int idx = seg.Index == -1 ? ids.Count : seg.Index.Value;
                 if (idx < 1 || idx > ids.Count)
-                    throw new CliError("not_found", $"{whole}：模型空间只有 {ids.Count} 个 {type}。");
+                    throw new CliError("not_found", $"{whole}：{(space == null ? "模型空间" : "该布局")}只有 {ids.Count} 个 {type}。");
                 return ids[idx - 1];
             }
 

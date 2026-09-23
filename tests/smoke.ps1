@@ -83,6 +83,16 @@ if ($h.Count -ge 8) {
 }
 Step "离线 LISP"       @("lisp", $b, "--file", $lsp)
 
+# ---- 第 2 批：布局 / 视口（文档模式）/ 打印 ----
+$n2 = Join-Path $out "第2批.dwg"
+Step "第2批 新建"          @("create", $n2)
+Step "第2批 布局与视口"    @("batch", "--dwg", $n2, "--input", (Join-Path $PSScriptRoot "layouts.json"))
+Step "第2批 布局列表"      @("get", $n2, "/layouts")
+Step "第2批 图纸空间查询"  @("query", $n2, "entity[space=A3-平面]")
+Step "第2批 打印布局"      @("plot", $n2, "A3-平面", "--prop", "output=$(Join-Path $out 'A3-平面.pdf')")
+Step "第2批 打印模型"      @("plot", $n2, "Model", "--prop", "area=extents", "--prop", "paper=A3", "--prop", "landscape=true", "--prop", "mono=true", "--prop", "output=$(Join-Path $out 'model.pdf')")
+Step "第2批 中文返回值"    @("lisp", $n2, "--file", $lsp)
+
 $h1 = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($new)[0..5])
 $h2 = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($b)[0..5])
 Add-Content $log "文件格式：新建.dwg=$h1  b.dwg=$h2" -Encoding UTF8

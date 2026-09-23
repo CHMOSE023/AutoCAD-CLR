@@ -38,9 +38,10 @@ namespace AcadClr.Plugin.Engine
             return ids[0];
         }
 
-        private static void Append(Database db, Transaction tr, Entity e)
+        /// <summary>新实体放进指定的块表记录（源实体所在的模型空间或布局）。</summary>
+        private static void Append(Transaction tr, ObjectId owner, Entity e)
         {
-            var ms = (BlockTableRecord)tr.GetObject(Acad.ModelSpace(db), OpenMode.ForWrite);
+            var ms = (BlockTableRecord)tr.GetObject(owner, OpenMode.ForWrite);
             ms.AppendEntity(e);
             tr.AddNewlyCreatedDBObject(e, true);
         }
@@ -71,7 +72,7 @@ namespace AcadClr.Plugin.Engine
 
             var list = new List<Entity>();
             foreach (DBObject o in res)
-                if (o is Entity e) { Append(db, tr, e); list.Add(e); }
+                if (o is Entity e) { Append(tr, curve.OwnerId, e); list.Add(e); }
             if (list.Count == 0) throw new CliError("invalid_value", "偏移没有产生结果（距离过大或几何不允许）。");
             return list;
         }
@@ -111,7 +112,7 @@ namespace AcadClr.Plugin.Engine
                 {
                     var c = (Entity)src.Clone();
                     c.TransformBy(m);
-                    Append(db, tr, c);
+                    Append(tr, src.OwnerId, c);
                     list.Add(c);
                 }
                 else
@@ -135,7 +136,7 @@ namespace AcadClr.Plugin.Engine
                 try { ent.Explode(frags); }
                 catch (AcRx.Exception) { throw new CliError("invalid_value", $"{Nodes.TypeOf(ent)}（{ent.Handle}）不能分解。"); }
                 foreach (DBObject o in frags)
-                    if (o is Entity fe) { Append(db, tr, fe); list.Add(fe); }
+                    if (o is Entity fe) { Append(tr, ent.OwnerId, fe); list.Add(fe); }
                 ent.Erase();
             }
             return list;
@@ -172,7 +173,7 @@ namespace AcadClr.Plugin.Engine
                 if (pieces[i] is Entity e)
                 {
                     e.SetPropertiesFrom(curve);
-                    Append(db, tr, e);
+                    Append(tr, curve.OwnerId, e);
                     list.Add(e);
                 }
             }
@@ -228,7 +229,7 @@ namespace AcadClr.Plugin.Engine
                         var c = (Entity)src.Clone();
                         // rotateItems=false：只把位置绕中心转，实体本身保持朝向（树、路灯）
                         c.TransformBy(rotate ? rot : Matrix3d.Displacement(refPt.TransformBy(rot) - refPt));
-                        Append(db, tr, c);
+                        Append(tr, src.OwnerId, c);
                         list.Add(c);
                     }
                 }
@@ -254,7 +255,7 @@ namespace AcadClr.Plugin.Engine
                         double dx = c * csp, dy = r * rs;
                         var e = (Entity)src.Clone();
                         e.TransformBy(Matrix3d.Displacement(new Vector3d(dx * cos - dy * sin, dx * sin + dy * cos, 0)));
-                        Append(db, tr, e);
+                        Append(tr, src.OwnerId, e);
                         list.Add(e);
                     }
             }

@@ -1,0 +1,10 @@
+[
+  {"op":"add","parent":"/model","type":"polyline","props":{"points":"0,0;30000,0;30000,20000;0,20000","closed":true}},
+  {"op":"add","parent":"/model","type":"circle","props":{"center":"15000,10000","radius":5000}},
+  {"op":"add","parent":"/layouts","type":"layout","props":{"name":"A3-平面","device":"DWG To PDF.pc3","paper":"full_bleed_A3","landscape":true}},
+  {"op":"add","parent":"$2","type":"polyline","props":{"points":"10,10;410,10;410,287;10,287","closed":true,"layer":"图框"}},
+  {"op":"add","parent":"$2","type":"text","props":{"text":"一层平面图 1:100","position":"300,20","height":5}},
+  {"op":"add","parent":"$2","type":"viewport","props":{"center":"210,150","width":380,"height":250,"viewCenter":"15000,10000","scale":100,"locked":true}},
+  {"op":"set","path":"/layout[@name=布局1]","props":{"name":"A1-总图","device":"DWG To PDF.pc3","paper":"A1","landscape":true}},
+  {"op":"remove","path":"/layout[@name=布局2]"}
+]

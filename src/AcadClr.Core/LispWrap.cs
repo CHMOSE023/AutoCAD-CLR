@@ -98,12 +98,23 @@ namespace AcadClr.Core
                    "(princ))";
         }
 
-        /// <summary>AutoCAD 2021 之前 write-line 按系统 ANSI 代码页写，之后是 UTF-8：先严格按 UTF-8 解码，失败退回 ANSI。</summary>
-        public static Response Parse(byte[] bytes)
+        /// <summary>
+        /// LISP 写出的文本按 AutoCAD 版本解码：2021 起 AutoLISP 是 Unicode（UTF-8），之前是系统 ANSI 代码页。
+        /// 不能“先试 UTF-8、失败再退回 ANSI”：GBK 编码的中文常常恰好也是合法的 UTF-8
+        /// （“实时”的 GBK 字节 CA B5 CA B1 会被解成 “ʵʱ”），必须按版本确定。
+        /// </summary>
+        public static string Decode(byte[] bytes, bool utf8)
         {
-            string text;
-            try { text = new UTF8Encoding(false, true).GetString(bytes); }
-            catch (DecoderFallbackException) { text = Encoding.Default.GetString(bytes); }
+            int skip = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF ? 3 : 0;
+            return utf8 ? Encoding.UTF8.GetString(bytes, skip, bytes.Length - skip) : Encoding.Default.GetString(bytes);
+        }
+
+        /// <summary>AutoCAD 年份（2014、2020…）对应的 LISP 文本编码是否为 UTF-8。</summary>
+        public static bool IsUtf8Year(int year) => year >= 2021;
+
+        public static Response Parse(byte[] bytes, bool utf8)
+        {
+            var text = Decode(bytes, utf8);
 
             var parts = text.Replace("\r\n", "\n").Split(new[] { '\n' }, 2);
             var status = parts[0].Trim();

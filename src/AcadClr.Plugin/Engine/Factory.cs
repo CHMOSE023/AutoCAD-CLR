@@ -22,9 +22,13 @@ namespace AcadClr.Plugin.Engine
 
         public static bool Handles(string type) => Supported.Contains(type);
 
+        /// <summary>本次 Create 的目标空间（模型空间或布局的块表记录）。只在主线程上使用。</summary>
+        [ThreadStatic] private static ObjectId _space;
+
         public static Entity Create(Database db, Transaction tr, string type, Dictionary<string, string> p,
-            Func<string, ObjectId> resolve, HashSet<string> consumed)
+            Func<string, ObjectId> resolve, HashSet<string> consumed, ObjectId space)
         {
+            _space = space;
             string? Get(string k) { consumed.Add(k); return p.TryGetValue(k, out var v) ? v : null; }
             string Need(string k) => Get(k) ?? throw new CliError("missing_property", $"添加 {type} 缺少属性：{k}。", $"运行 acadclr help {type} 查看示例。");
 
@@ -72,7 +76,7 @@ namespace AcadClr.Plugin.Engine
 
         private static void Append(Database db, Transaction tr, Entity e)
         {
-            var ms = (BlockTableRecord)tr.GetObject(Acad.ModelSpace(db), OpenMode.ForWrite);
+            var ms = (BlockTableRecord)tr.GetObject(_space, OpenMode.ForWrite);
             ms.AppendEntity(e);
             tr.AddNewlyCreatedDBObject(e, true);
         }

@@ -89,6 +89,19 @@ namespace AcadClr.Cli
             req.Dwg = Path.GetFullPath(req.Dwg!);
             if (!req.Create && CheckOpenable(console, req.Dwg) is Response bad) return bad;
 
+            // 新建视口必须在真正的文档上执行（后台数据库里操作视口会让 accoreconsole 崩溃）
+            bool needDocument = req.Items.Any(i => i.Verb == "add" && string.Equals(i.Type?.Trim(), "viewport", StringComparison.OrdinalIgnoreCase));
+            if (needDocument)
+            {
+                if (req.Create)
+                {
+                    var created = Send(new Request { Create = true, Dwg = req.Dwg }, acadHint, timeoutSec);
+                    if (created.Error != null) return created;
+                    req.Create = false;
+                }
+                return SendOnDocument(req, console, plugin, timeoutSec);
+            }
+
             var tmp = NewTempDir();
             var reqPath = Path.Combine(tmp, "request.json");
             req.ResponsePath = Path.Combine(tmp, "response.json");
@@ -107,6 +120,79 @@ namespace AcadClr.Cli
                     return Response.Fail("offline_failed", "accoreconsole 没有返回结果，插件多半未能加载（SECURELOAD 拒绝了不受信任位置的 DLL）。" +
                         (log.Length > 0 ? "控制台输出末尾：\n" + Tail(log, 12) : ""),
                         $"在 AutoCAD {ConsoleYear(console)}「选项 → 文件 → 受信任的位置」中添加 {LiveTransport.AppDir.TrimEnd('\\')}");
+                return Json.Deserialize<Response>(File.ReadAllText(req.ResponsePath, Encoding.UTF8));
+            }
+            finally { Cleanup(tmp); }
+        }
+
+        /// <summary>
+        /// 文档模式：accoreconsole /i 打开 DWG，NETLOAD 插件后在该文档上执行 ACADCLR_RUN；
+        /// 插件确认有修改时写标记文件，脚本见到标记才按原格式另存。
+        /// </summary>
+        private static Response SendOnDocument(Request req, string console, string plugin, int timeoutSec)
+        {
+            if (req.Dwg != null && IsLocked(req.Dwg))
+                return Response.Fail("file_locked", $"文件正被占用（可能已在 AutoCAD 中打开）：{req.Dwg}", "关闭后重试，或改用实时模式");
+
+            var tmp = NewTempDir();
+            var reqPath = Path.Combine(tmp, "request.json");
+            req.UseDocument = true;
+            req.ResponsePath = Path.Combine(tmp, "response.json");
+            File.WriteAllText(reqPath, Json.Serialize(req), new UTF8Encoding(false));
+            var before = File.GetLastWriteTimeUtc(req.Dwg!);
+            try
+            {
+                var body = string.Join("\r\n", "_.NETLOAD", "\"" + plugin + "\"", "ACADCLR_RUN", reqPath);
+                var log = RunScript(console, req.Dwg!, body, true, tmp, timeoutSec, out bool finished, out string? opened, req.ResponsePath + ".save");
+                if (!finished) return Response.Fail("timeout", $"accoreconsole {timeoutSec} 秒内未完成。", "大图可用 --timeout 加长");
+                if (WrongDocument(req.Dwg!, opened) is Response wrong) return wrong;
+                if (!File.Exists(req.ResponsePath))
+                    return Response.Fail("offline_failed", "accoreconsole 没有返回结果（文档模式）。" + (log.Length > 0 ? "控制台输出末尾：\n" + Tail(log, 12) : ""));
+
+                var resp = Json.Deserialize<Response>(File.ReadAllText(req.ResponsePath, Encoding.UTF8));
+                if (resp.Saved == true && File.GetLastWriteTimeUtc(req.Dwg!) == before)
+                {
+                    resp.Saved = false;
+                    resp.Ok = false;
+                    resp.Error = new ErrorInfo { Code = "save_failed", Message = "修改已完成，但另存回原文件失败，文件未改变。" };
+                }
+                return resp;
+            }
+            finally { Cleanup(tmp); }
+        }
+
+        /// <summary>
+        /// 离线打印：/i 打开 DWG，脚本先 (setvar "CTAB" 布局) 切到目标布局（命令里不能切），
+        /// 再 NETLOAD 插件并执行 ACADCLR_PLOT。打印不修改图纸，退出时放弃修改。
+        /// </summary>
+        public static Response Plot(string dwg, string? layout, JObject? props, string? acadHint, int timeoutSec)
+        {
+            var console = FindConsole(acadHint, out var why);
+            if (console == null) return Response.Fail("no_accoreconsole", why, "用 --acad <年份或 accoreconsole.exe 路径> 指定，或 acadclr config acad 2014");
+            var plugin = Path.Combine(LiveTransport.AppDir, "AcadClr.Plugin.dll");
+            var full = Path.GetFullPath(dwg);
+            if (CheckOpenable(console, full) is Response bad) return bad;
+
+            var name = string.IsNullOrWhiteSpace(layout) ? "Model" : layout!;
+            var tmp = NewTempDir();
+            var reqPath = Path.Combine(tmp, "request.json");
+            var req = new Request
+            {
+                Kind = "plot",
+                Dwg = full,
+                ResponsePath = Path.Combine(tmp, "response.json"),
+                Items = { new BatchItem { Command = "plot", Path = $"/layout[@name={name}]", Props = props } },
+            };
+            File.WriteAllText(reqPath, Json.Serialize(req), new UTF8Encoding(false));
+            try
+            {
+                var body = string.Join("\r\n", "(setvar \"CTAB\" " + LispString(name) + ")", "_.NETLOAD", "\"" + plugin + "\"", "ACADCLR_PLOT", reqPath);
+                var log = RunScript(console, full, body, false, tmp, timeoutSec, out bool finished, out string? opened);
+                if (!finished) return Response.Fail("timeout", $"accoreconsole {timeoutSec} 秒内未完成。", "大图可用 --timeout 加长");
+                if (WrongDocument(full, opened) is Response wrong) return wrong;
+                if (!File.Exists(req.ResponsePath))
+                    return Response.Fail("offline_failed", "accoreconsole 没有返回打印结果。" + (log.Length > 0 ? "控制台输出末尾：\n" + Tail(log, 12) : ""),
+                        "布局名是否正确（acadclr get <dwg> /layouts）；插件目录是否在受信任位置");
                 return Json.Deserialize<Response>(File.ReadAllText(req.ResponsePath, Encoding.UTF8));
             }
             finally { Cleanup(tmp); }
@@ -134,7 +220,7 @@ namespace AcadClr.Cli
                 if (!File.Exists(outFile))
                     return Response.Fail("lisp_error", "LISP 没有产出结果，多半是括号不匹配或语法错误。" + (log.Length > 0 ? "控制台输出末尾：\n" + Tail(log, 12) : ""));
 
-                var resp = LispWrap.Parse(File.ReadAllBytes(outFile));
+                var resp = LispWrap.Parse(File.ReadAllBytes(outFile), LispWrap.IsUtf8Year(ConsoleYear(console)));
                 resp.Document = full;
                 if (save) resp.Saved = File.GetLastWriteTimeUtc(full) != before;
                 return resp;
@@ -200,8 +286,9 @@ namespace AcadClr.Cli
         ///       最后 QUIT；图形改过又没保存会问“是否放弃修改”，答 Y。</item>
         /// </list>
         /// </summary>
+        /// <param name="saveFlag">不为 null 时，只有该文件存在（插件确认有修改）才另存。</param>
         private static string RunScript(string console, string dwg, string body, bool save, string tmp, int timeoutSec,
-            out bool finished, out string? opened)
+            out bool finished, out string? opened, string? saveFlag = null)
         {
             var marker = Path.Combine(tmp, "opened.txt");
             var parts = new List<string>
@@ -213,8 +300,9 @@ namespace AcadClr.Cli
             if (save)
             {
                 var lispPath = LispString(dwg);
-                parts.Add("(if (= (strcase (strcat (getvar \"DWGPREFIX\") (getvar \"DWGNAME\"))) (strcase " + lispPath + "))" +
-                          " (command \"_.SAVEAS\" \"" + SaveFormat(dwg) + "\" " + lispPath + " \"_Y\"))");
+                var cond = "(= (strcase (strcat (getvar \"DWGPREFIX\") (getvar \"DWGNAME\"))) (strcase " + lispPath + "))";
+                if (saveFlag != null) cond = "(and " + cond + " (findfile " + LispString(saveFlag.Replace("\\", "/")) + "))";
+                parts.Add("(if " + cond + " (command \"_.SAVEAS\" \"" + SaveFormat(dwg) + "\" " + lispPath + " \"_Y\"))");
             }
             parts.Add("_.QUIT");
             parts.Add("_Y");
@@ -232,7 +320,7 @@ namespace AcadClr.Cli
             File.WriteAllText(script, sb.ToString(), ScriptEncoding(console));
             var log = RunConsole(console, $"/i \"{dwg}\" /s \"{script}\"", tmp, timeoutSec, out finished);
 
-            opened = File.Exists(marker) ? DecodeLisp(File.ReadAllBytes(marker)).Trim() : null;
+            opened = File.Exists(marker) ? LispWrap.Decode(File.ReadAllBytes(marker), LispWrap.IsUtf8Year(ConsoleYear(console))).Trim() : null;
             return log;
         }
 
@@ -247,12 +335,6 @@ namespace AcadClr.Cli
 
         /// <summary>写成 LISP 字符串字面量（反斜杠与引号转义）。</summary>
         private static string LispString(string s) => "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
-
-        private static string DecodeLisp(byte[] bytes)
-        {
-            try { return new UTF8Encoding(false, true).GetString(bytes); }
-            catch (DecoderFallbackException) { return Encoding.Default.GetString(bytes); }
-        }
 
         // ---------------- DWG 格式与 AutoCAD 版本 ----------------
 

@@ -62,6 +62,13 @@ namespace AcadClr.Plugin
             OfflineHost.RunFile(pr.StringResult.Trim().Trim('"'));
         }
 
+        /// <summary>
+        /// 打印命令：实时模式由插件从命令队列触发（参数在内存里）；离线模式由脚本调用，参数为请求文件路径。
+        /// PlotEngine 必须在文档上下文（命令）中运行。
+        /// </summary>
+        [CommandMethod("ACADCLR_PLOT")]
+        public void Plot() => Plotting.Command();
+
         [MethodImpl(MethodImplOptions.NoInlining)]
         private static void StartServer()
         {

@@ -62,6 +62,18 @@ acadclr batch --dwg plan.dwg --input plan.json   # 离线模式，自动写回�
 - `trim` `extend` `fillet` `chamfer` 是 AutoCAD 命令，只能单独调用。目标写成 `句柄@x,y`，拾取点落在要剪掉或要延伸的那一段上：
   `acadclr edit trim "8D@13500,2000" --prop edges=8B`
 
+## 布局、视口与打印
+
+- 实体画在哪个空间，由父路径决定：`/model` 或 `/layout[@name=A3]`。不存在"当前空间"这个概念，切换当前布局也不影响 add 的去向。
+- 出图的典型流程：
+  1. `add /layouts --type layout --prop name=A3 --prop paper=full_bleed_A3 --prop landscape=true`
+  2. 往 `/layout[@name=A3]` 里画图框和标题栏（单位是图纸毫米）
+  3. 加视口：`--type viewport --prop center=… width=… height=… viewCenter=<模型坐标> scale=100 locked=true`
+  4. `acadclr plot "/layout[@name=A3]" --prop output=D:/out/A3.pdf`
+  5. 打开 PDF 核对结果
+- 打印范围只有 layout（默认）和 extents。只出局部时，用视口框定。
+- 查看纸张名：`get "/device[@name=DWG To PDF.pc3]"`；查询图纸空间：`query "entity[space=A3]"`。
+
 ## 外部参照
 
 `get /xrefs` 列出外部参照；`query "xref[status=filenotfound]"` 找出丢失的参照。

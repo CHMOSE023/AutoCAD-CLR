@@ -25,6 +25,7 @@ namespace AcadClr.Plugin.Engine
                 case DBText _: return "text";
                 case MText _: return "mtext";
                 case DBPoint _: return "point";
+                case Viewport _: return "viewport";
                 case Ellipse _: return "ellipse";
                 case Spline _: return "spline";
                 case Xline _: return "xline";
@@ -41,7 +42,27 @@ namespace AcadClr.Plugin.Engine
 
         public static TypeDef SchemaOf(string type) => Schema.FindType(type) ?? Schema.GenericEntity(type);
 
-        public static string EntityPath(string type, Entity e) => $"/model/{type}[@handle={e.Handle}]";
+        /// <summary>
+        /// 实体的规范路径跟随它实际所在的空间：模型空间 /model/…，图纸空间 /layout[@name=X]/…，
+        /// 其他（块定义内部等）用 /entity[@handle=…]。空间写在路径里，不会出现“以为画在布局上其实进了模型空间”的情况。
+        /// </summary>
+        public static string EntityPath(Transaction tr, string type, Entity e)
+        {
+            var layout = SpaceName(tr, e);
+            if (layout == null) return $"/entity[@handle={e.Handle}]";
+            return layout == Layouts.ModelName
+                ? $"/model/{type}[@handle={e.Handle}]"
+                : $"{Layouts.LayoutPath(layout)}/{type}[@handle={e.Handle}]";
+        }
+
+        /// <summary>实体所在空间的布局名（模型空间为 Model）；不在任何布局里时返回 null。</summary>
+        public static string? SpaceName(Transaction tr, Entity e)
+        {
+            if (e.OwnerId == Acad.ModelSpace(e.Database)) return Layouts.ModelName;
+            if (tr.GetObject(e.OwnerId, OpenMode.ForRead) is BlockTableRecord btr && btr.IsLayout && !btr.LayoutId.IsNull)
+                return ((Layout)tr.GetObject(btr.LayoutId, OpenMode.ForRead)).LayoutName;
+            return null;
+        }
 
         public static string LayerPath(string name) => $"/layer[@name={name}]";
 
@@ -109,6 +130,16 @@ namespace AcadClr.Plugin.Engine
                 case DBPoint pt:
                     p["position"] = Acad.Fmt(pt.Position);
                     break;
+                case Viewport vp:
+                    p["center"] = Acad.Fmt(vp.CenterPoint);
+                    p["width"] = Values.Num(vp.Width);
+                    p["height"] = Values.Num(vp.Height);
+                    p["viewCenter"] = Acad.Fmt(vp.ViewCenter);
+                    p["scale"] = vp.CustomScale > 0 ? Values.Num(1.0 / vp.CustomScale) : "";
+                    p["on"] = vp.On ? "true" : "false";
+                    p["locked"] = vp.Locked ? "true" : "false";
+                    p["viewHeight"] = Values.Num(vp.ViewHeight);
+                    break;
                 case Ellipse el:
                     p["center"] = Acad.Fmt(el.Center);
                     p["majorAxis"] = Acad.Fmt(el.MajorAxis);
@@ -175,7 +206,11 @@ namespace AcadClr.Plugin.Engine
             }, "");
             if (p["bbox"].Length == 0) p.Remove("bbox");
 
-            return new Node { Path = EntityPath(type, e), Type = type, Props = p };
+            // 只有不在模型空间时才标出所在空间（查询时 [space=A3] 可用；模型空间按 Model 匹配）
+            var space = SpaceName(tr, e);
+            if (space != null && space != Layouts.ModelName) p["space"] = space;
+
+            return new Node { Path = EntityPath(tr, type, e), Type = type, Props = p };
         }
 
         public static string DimensionKind(Dimension d)
@@ -273,6 +308,7 @@ namespace AcadClr.Plugin.Engine
                     ["version"] = FormatVersion(db.OriginalFileVersion),
                     ["units"] = Acad.Fmt(db.Insunits),
                     ["currentLayer"] = clayer.Name,
+                    ["currentLayout"] = Layouts.CurrentName(),
                     ["layers"] = CountLayers(db, tr).ToString(),
                     ["entities"] = ModelEntityIds(db, tr).Count().ToString(),
                 },

@@ -39,6 +39,8 @@ namespace AcadClr.Plugin.Host
                     return req.CommandQueue
                         ? LispRunner.ViaCommandQueue(req.Code!, TimeoutMs)
                         : MainThread.Invoke(() => LispRunner.Eval(req.Code!), TimeoutMs);
+                case "plot":
+                    return Plotting.Live(req, 180_000); // 管道线程：内部轮询等待命令完成，不能占用主线程
                 case "script":
                     if (string.IsNullOrWhiteSpace(req.Code)) return Response.Fail("bad_request", "script 缺少内容。");
                     return MainThread.Invoke(() => LispRunner.QueueScript(req.Code!), TimeoutMs);
@@ -131,6 +133,7 @@ namespace AcadClr.Plugin.Host
         {
             if (string.IsNullOrEmpty(req.Dwg)) return Response.Fail("bad_request", "离线请求缺少 dwg 路径。");
             var path = Path.GetFullPath(req.Dwg);
+            if (req.UseDocument) return RunOnDocument(req, path);
 
             if (req.Create)
             {
@@ -178,6 +181,24 @@ namespace AcadClr.Plugin.Host
                     HostApplicationServices.WorkingDatabase = previous;
                 }
             }
+        }
+
+        /// <summary>文档模式：在 accoreconsole 以 /i 打开的文档上执行；保存交给脚本（按原格式 SAVEAS）。</summary>
+        private static Response RunOnDocument(Request req, string path)
+        {
+            var doc = CoreApp.DocumentManager.MdiActiveDocument;
+            if (doc == null || !string.Equals(Path.GetFullPath(doc.Name), path, StringComparison.OrdinalIgnoreCase))
+                return Response.Fail("open_failed", $"accoreconsole 当前打开的不是 {path}（而是 {doc?.Name}）。");
+
+            var exec = new Executor(doc.Database, path);
+            var resp = exec.Run(req);
+            resp.Document = path;
+            if (exec.CommittedChanges && req.ResponsePath != null)
+            {
+                File.WriteAllText(req.ResponsePath + ".save", "1");
+                resp.Saved = true; // 由脚本随后另存；CLI 会核对文件是否真的更新
+            }
+            return resp;
         }
     }
 }

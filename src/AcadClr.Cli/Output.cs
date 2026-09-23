@@ -34,6 +34,16 @@ namespace AcadClr.Cli
                 return 0;
             }
 
+            if (verb == "plot" && resp.Data != null)
+            {
+                var d = resp.Data;
+                Console.WriteLine($"已打印：{d["file"]}（{d["sizeKB"]} KB）");
+                Console.WriteLine($"布局={d["layout"]}  设备={d["device"]}  纸张={d["paper"]}  范围={d["area"]}  比例={d["scale"]}" +
+                                  ((bool?)d["mono"] == true ? "  单色" : ""));
+                if (d["skipped"] != null) Console.WriteLine("（该设备 / 范围组合不支持、已跳过的设置：" + d["skipped"] + "）");
+                return 0;
+            }
+
             if (verb == "script")
             {
                 if (resp.Data?["queued"] != null) { Console.WriteLine("已送入 AutoCAD 命令行（异步执行，不等待结果）。"); return 0; }

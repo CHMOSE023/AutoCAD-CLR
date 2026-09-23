@@ -114,6 +114,13 @@ namespace AcadClr.Core
         /// <summary>离线模式：新建空白 DWG（文件已存在则报错）。</summary>
         [JsonProperty("create")] public bool Create { get; set; }
 
+        /// <summary>
+        /// 离线“文档模式”：accoreconsole 用 /i 把 DWG 打开成文档，插件直接操作该文档（而不是后台 Database）。
+        /// 新建视口、打印必须这样做 —— 后台数据库没有图形系统，操作视口会让 accoreconsole 崩溃。
+        /// 有修改时插件写一个标记文件（ResponsePath + ".save"），由脚本按原格式另存。
+        /// </summary>
+        [JsonProperty("useDocument")] public bool UseDocument { get; set; }
+
         /// <summary>离线模式：插件把 Response 写到这个文件。</summary>
         [JsonProperty("responsePath", NullValueHandling = NullValueHandling.Ignore)]
         public string? ResponsePath { get; set; }

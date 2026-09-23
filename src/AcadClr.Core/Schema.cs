@@ -244,6 +244,42 @@ namespace AcadClr.Core
                 P("annotation", "string", Verbs.Get, "注释多行文字的句柄"),
             }, "acadclr add /model --type leader --prop points=\"0,0;500,500;1200,500\" --prop text=说明 --prop height=250"),
 
+            new TypeDef("viewport", "/layout[@name=...]", "浮动视口：开在布局图纸上的窗口，按比例显示模型空间的一块区域", true, new[]
+            {
+                P("center", "point", Verbs.All, "视口中心（图纸坐标，毫米）", "center=210,148.5", true),
+                P("width", "number", Verbs.All, "宽（图纸毫米）", "width=380", true),
+                P("height", "number", Verbs.All, "高（图纸毫米）", "height=260", true),
+                P("viewCenter", "point", Verbs.All, "对准的模型空间点", "viewCenter=15000,10000"),
+                P("scale", "number", Verbs.All, "比例 1:N 的 N（1 图纸毫米 = N 个图形单位）", "scale=100"),
+                P("on", "bool", Verbs.All, "是否打开（显示内容）"),
+                P("locked", "bool", Verbs.All, "是否锁定（防止误改比例与视图）", "locked=true"),
+                P("viewHeight", "number", Verbs.Get, "视口内显示的模型高度"),
+            }.Concat(CommonEntityProps.Where(p => p.Name != "rotate" && p.Name != "scale")),
+               "acadclr add \"/layout[@name=A3]\" --type viewport --prop center=210,148.5 --prop width=380 --prop height=260 --prop viewCenter=15000,10000 --prop scale=100 --prop locked=true"),
+
+            new TypeDef("layout", "/layouts", "布局（图纸空间）及其页面设置。新建、删除、重命名、切换是数据库级操作，不参与 batch 回滚", false, new[]
+            {
+                P("name", "string", Verbs.All, "布局名（set 即重命名）", "name=A3-平面", true),
+                P("current", "bool", Verbs.All, "设为当前布局（只能设 true；Model 为模型空间）", "current=true"),
+                P("device", "string", Verbs.All, "打印设备，默认 DWG To PDF.pc3", "device=DWG To PDF.pc3"),
+                P("paper", "string", Verbs.All, "纸张：完整纸张名，或 A4 / A3 / A1 这类简称（模糊匹配）", "paper=A3"),
+                P("landscape", "bool", Verbs.All, "横向", "landscape=true"),
+                P("plotStyle", "string", Verbs.All, "打印样式表（ctb / stb）", "plotStyle=monochrome.ctb"),
+                P("paperSize", "string", Verbs.Get, "纸张尺寸（毫米）"),
+                P("tabOrder", "number", Verbs.Get, "标签顺序"),
+                P("viewports", "number", Verbs.Get, "浮动视口数"),
+                P("entities", "number", Verbs.Get, "图纸空间实体数（不含视口）"),
+            }, "acadclr add /layouts --type layout --prop name=A3 --prop paper=A3 --prop landscape=true",
+               "acadclr set \"/layout[@name=A3]\" --prop current=true",
+               "acadclr add \"/layout[@name=A3]\" --type polyline --prop points=\"10,10;410,10;410,287;10,287\" --prop closed=true"),
+
+            new TypeDef("device", "/devices", "打印设备（只读）：get /devices 列出设备，get \"/device[@name=...]\" 列出纸张与打印样式表", false, new[]
+            {
+                P("name", "string", Verbs.Get, "设备名"),
+                P("media", "string", Verbs.Get, "该设备支持的纸张名（; 分隔）"),
+                P("styleSheets", "string", Verbs.Get, "可用打印样式表（; 分隔）"),
+            }, "acadclr get /devices", "acadclr get \"/device[@name=DWG To PDF.pc3]\""),
+
             new TypeDef("layer", "/layers", "图层", false, new[]
             {
                 P("name", "string", Verbs.All, "图层名（set 即重命名）", "name=WALL", true),
@@ -286,6 +322,7 @@ namespace AcadClr.Core
                 P("version", "string", Verbs.Get, "DWG 版本"),
                 P("units", "units", Verbs.Get | Verbs.Set, "图形单位 INSUNITS：mm cm m in ft unitless", "units=mm"),
                 P("currentLayer", "string", Verbs.Get | Verbs.Set, "当前图层", "currentLayer=WALL"),
+                P("currentLayout", "string", Verbs.Get, "当前布局（切换用 set \"/layout[@name=...]\" --prop current=true）"),
                 P("layers", "number", Verbs.Get, "图层数"),
                 P("entities", "number", Verbs.Get, "模型空间实体数"),
             }, "acadclr get /", "acadclr set / --prop units=mm"),
@@ -409,7 +446,43 @@ namespace AcadClr.Core
         public static TypeDef GenericEntity(string dxfType) =>
             new TypeDef(dxfType, "/model", "其他实体（仅支持公共属性）", true, CommonEntityProps);
 
-        public static IEnumerable<string> AddableTypes => Types.Where(t => t.Name != "document").Select(t => t.Name);
+        public static IEnumerable<string> AddableTypes => Types.Where(t => t.Name != "document" && t.Name != "device").Select(t => t.Name);
+
+        // ---------------- plot ----------------
+
+        public static readonly List<PropDef> PlotProps = new List<PropDef>
+        {
+            P("output", "string", Verbs.Set, "输出文件（绝对路径）；缺省为图纸同目录下 <图名>-<布局>-<时间>.pdf", "output=D:\\out\\A3.pdf"),
+            P("device", "string", Verbs.Set, "打印设备，默认 DWG To PDF.pc3"),
+            P("paper", "string", Verbs.Set, "纸张：完整名或 A3 这类简称；缺省沿用布局页面设置", "paper=A3"),
+            P("landscape", "bool", Verbs.Set, "横向"),
+            P("area", "string", Verbs.Set, "范围：layout（布局图纸，默认）或 extents（图形范围；模型空间默认）", "area=extents"),
+            P("scale", "string", Verbs.Set, "比例：fit（布满，默认）或 1:N 的 N", "scale=100"),
+            P("mono", "bool", Verbs.Set, "单色（monochrome.ctb）"),
+        };
+
+        public static string HelpPlot()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("plot —— 把布局（或模型空间）打印到 PDF");
+            sb.AppendLine();
+            sb.AppendLine("用法：acadclr plot [布局名或路径] [--prop key=value ...]");
+            sb.AppendLine("      不给布局时，实时模式打印当前布局，离线模式打印 Model（范围 extents）");
+            sb.AppendLine();
+            sb.AppendLine("属性：");
+            foreach (var p in PlotProps)
+                sb.AppendLine("  " + p.Name.PadRight(11) + p.Description + (p.Example != null ? "    例：" + p.Example : ""));
+            sb.AppendLine();
+            sb.AppendLine("说明：");
+            sb.AppendLine("  · 只出图纸的局部：建布局，用视口的 viewCenter / scale / width / height 框定范围，再打印该布局。");
+            sb.AppendLine("  · area=window / display / limits 在 AutoCAD 2014 的打印引擎上出不了内容（AutoCADMCP 实测），不支持。");
+            sb.AppendLine("  · 离线模式需要插件能在 accoreconsole 中加载（插件目录须在受信任位置）。");
+            sb.AppendLine();
+            sb.AppendLine("示例：");
+            sb.AppendLine("  acadclr plot \"/layout[@name=A3]\" --prop output=D:\\out\\A3.pdf");
+            sb.AppendLine("  acadclr plot plan.dwg Model --prop area=extents --prop paper=A3 --prop landscape=true --prop mono=true");
+            return sb.ToString();
+        }
 
         /// <summary>
         /// 校验属性名与动词是否匹配。未知属性给出最接近的候选；只读属性在 add/set 时报错。
@@ -472,6 +545,7 @@ namespace AcadClr.Core
             sb.AppendLine("  set <path|selector>            修改属性（含 move / rotate / scale）");
             sb.AppendLine("  remove <path|selector>         删除（一次超过 30 个需 --force）");
             sb.AppendLine("  edit <动作> <目标>             偏移 镜像 分解 打断 合并 阵列 修剪 延伸 倒圆角 倒角");
+            sb.AppendLine("  plot [布局]                    打印到 PDF（acadclr help plot）");
             sb.AppendLine("  batch                          批量执行 JSON（--input 文件 / --commands 字符串 / 标准输入）");
             sb.AppendLine("  stats                          按类型、图层统计实体，给出图形范围");
             sb.AppendLine("  lisp \"<expr>\" | --file f.lsp   执行 AutoLISP 并返回值（--cmd 走命令队列，离线加 --save 保存）");
@@ -489,7 +563,8 @@ namespace AcadClr.Core
             sb.AppendLine("          --best-effort  --stop-on-error  --force  --depth N  --limit N  --timeout 秒");
             sb.AppendLine();
             sb.AppendLine("路径：/  /model  /model/line[1]  /model/entity[@handle=2A3]  /entity[@handle=2A3]");
-            sb.AppendLine("      /layers  /layer[@name=WALL]  /xrefs  /xref[@name=BASE]");
+            sb.AppendLine("      /layers  /layer[@name=WALL]  /xrefs  /xref[@name=BASE]  /devices  /device[@name=...]");
+            sb.AppendLine("      /layouts  /layout[@name=A3]  /layout[@name=A3]/viewport[1]  （图纸空间实体的父路径是布局）");
             sb.AppendLine("      （索引从 1 开始，[last()] 取最后一个）");
             sb.AppendLine();
             sb.AppendLine("类型：" + string.Join("  ", Types.Select(t => t.Name)));
