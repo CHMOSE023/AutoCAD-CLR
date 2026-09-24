@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
 using AcadClr.Core;
 using AcadClr.Plugin.Engine;
 using Autodesk.AutoCAD.DatabaseServices;
@@ -12,38 +13,46 @@ namespace AcadClr.Plugin.Host
     /// <summary>实时模式：请求来自命名管道，作用于 AutoCAD 当前活动文档。</summary>
     internal static class LiveHost
     {
-        private const int TimeoutMs = 120_000;
+        private const int DefaultTimeoutMs = 120_000;
+        private const int PlotTimeoutMs = 180_000;
 
-        public static Response Handle(Request req)
+        /// <summary>
+        /// 在请求线程（管道 / HTTP）上调用。<paramref name="ct"/> 在调用方断开时取消，
+        /// 取消时抛出 <see cref="OperationCanceledException"/>，由调用方丢弃结果。
+        /// </summary>
+        public static Response Handle(Request req, CancellationToken ct)
         {
-            try { return HandleCore(req); }
+            try { return HandleCore(req, ct); }
             catch (CliError ex) { return new Response { Ok = false, Error = ex.ToInfo() }; }
             catch (TimeoutException ex) { return Response.Fail("timeout", ex.Message); }
             catch (Autodesk.AutoCAD.Runtime.Exception ex) { return new Response { Ok = false, Error = Engine.Acad.Translate(ex).ToInfo() }; }
         }
 
-        private static Response HandleCore(Request req)
+        private static Response HandleCore(Request req, CancellationToken ct)
         {
+            int timeout = req.TimeoutMs is int t && t > 0 ? t : DefaultTimeoutMs;
             switch (req.Kind)
             {
                 case "ping":
                     return new Response { Data = new JObject { ["pid"] = Process.GetCurrentProcess().Id } };
                 case "status":
-                    return MainThread.Invoke(Status, TimeoutMs);
+                    return MainThread.Invoke(Status, timeout, ct);
                 case "save":
-                    return MainThread.Invoke(() => Save(req.SaveAs), TimeoutMs);
+                    return MainThread.Invoke(() => Save(req.SaveAs), timeout, ct);
                 case "run":
-                    return MainThread.Invoke(() => Run(req), TimeoutMs);
+                    return MainThread.Invoke(() => Run(req), timeout, ct);
                 case "lisp":
                     if (string.IsNullOrWhiteSpace(req.Code)) return Response.Fail("bad_request", "lisp 缺少代码。");
                     return req.CommandQueue
-                        ? LispRunner.ViaCommandQueue(req.Code!, TimeoutMs)
-                        : MainThread.Invoke(() => LispRunner.Eval(req.Code!), TimeoutMs);
+                        ? LispRunner.ViaCommandQueue(req.Code!, timeout, ct)
+                        : MainThread.Invoke(() => LispRunner.Eval(req.Code!), timeout, ct);
                 case "plot":
-                    return Plotting.Live(req, 180_000); // 管道线程：内部轮询等待命令完成，不能占用主线程
+                    // 请求线程：内部轮询等待命令完成，不能占用主线程。
+                    // 打印命令一旦送出就无法撤回，不响应取消，否则会在打印中途切回布局
+                    return Plotting.Live(req, req.TimeoutMs is int pt && pt > 0 ? pt : PlotTimeoutMs);
                 case "script":
                     if (string.IsNullOrWhiteSpace(req.Code)) return Response.Fail("bad_request", "script 缺少内容。");
-                    return MainThread.Invoke(() => LispRunner.QueueScript(req.Code!), TimeoutMs);
+                    return MainThread.Invoke(() => LispRunner.QueueScript(req.Code!), timeout, ct);
                 default:
                     return Response.Fail("bad_request", $"未知请求类型 “{req.Kind}”。");
             }

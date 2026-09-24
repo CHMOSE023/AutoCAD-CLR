@@ -36,8 +36,12 @@ namespace AcadClr.Cli
             catch (ArgumentException) { return false; }
         }
 
+        /// <summary>--timeout 指定的请求超时（毫秒），交给插件执行；为空用插件默认值。</summary>
+        public static int? TimeoutMs { get; set; }
+
         public static Response Send(Request req, int? pid)
         {
+            req.TimeoutMs ??= TimeoutMs;
             var all = Instances();
             var inst = pid.HasValue ? all.FirstOrDefault(i => i.Pid == pid.Value) : all.FirstOrDefault();
             if (inst == null)

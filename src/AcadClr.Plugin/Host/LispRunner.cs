@@ -52,24 +52,32 @@ namespace AcadClr.Plugin.Host
             finally { TryDelete(outFile); }
         }
 
-        /// <summary>管道线程调用（内部轮询等待，不能占用主线程）。</summary>
-        public static Response ViaCommandQueue(string code, int timeoutMs)
+        /// <summary>
+        /// 请求线程调用（内部轮询等待，不能占用主线程）。
+        /// 命令一旦送进命令行就无法撤回；<paramref name="ct"/> 取消只是停止等待，结果文件留给 <see cref="SweepStale"/> 清理。
+        /// </summary>
+        public static Response ViaCommandQueue(string code, int timeoutMs, CancellationToken ct = default)
         {
+            SweepStale();
             var outFile = NewOutFile();
             bool got = false;
             try
             {
-                // 沿用 AutoCADMCP 验证过的方式：在管道线程调用、activate=false。
+                // 沿用 AutoCADMCP 验证过的方式：在请求线程调用、activate=false。
                 // 不要改成在主线程（Idle 回调，属应用程序上下文）以 activate=true 调用：
                 // 实测 AutoCAD 会就地同步执行，(command "._trim" ...) 在应用程序上下文里运行导致 0xC0000005 崩溃。
                 // 必须是“一整行 + 一个回车”：中间有换行会让末尾回车变成重复上一条命令的空回车，导致崩溃
                 var body = LispWrap.Wrap(code, outFile, singleLine: true) + "\n";
-                var doc = MainThread.Invoke(ActiveDocument, 10_000);
+                var doc = MainThread.Invoke(ActiveDocument, 10_000, ct);
                 doc.SendStringToExecute(body, false, false, false);
 
                 var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
                 // 只轮询结果文件，不要向主窗口投递消息：(command ...) 执行期间干扰消息循环实测会让 AutoCAD 崩溃
-                while (DateTime.UtcNow < deadline && !File.Exists(outFile)) Thread.Sleep(30);
+                while (DateTime.UtcNow < deadline && !File.Exists(outFile))
+                {
+                    ct.ThrowIfCancellationRequested();
+                    Thread.Sleep(30);
+                }
                 if (!File.Exists(outFile))
                     return Response.Fail("timeout", $"命令队列 {timeoutMs / 1000} 秒内未返回结果。",
                         "AutoCAD 可能正在执行其他命令，或命令停在交互提示上；在 AutoCAD 里按 Esc 后重试");
@@ -89,6 +97,28 @@ namespace AcadClr.Plugin.Host
             // activate=false：在 Idle 回调（应用程序上下文）里 activate=true 会就地执行命令，可能崩溃
             doc.SendStringToExecute(body, false, false, false);
             return new Response { Document = doc.Name, Data = new Newtonsoft.Json.Linq.JObject { ["queued"] = true } };
+        }
+
+        /// <summary>
+        /// 预热命令队列：首次 SendStringToExecute 处理很慢，插件启动时先送一个空表达式。
+        /// 主线程调用；没有活动文档时跳过。
+        /// </summary>
+        public static void WarmUp()
+        {
+            try { CoreApp.DocumentManager.MdiActiveDocument?.SendStringToExecute("(princ)\n", false, false, false); }
+            catch (Exception) { /* 预热失败不影响使用 */ }
+        }
+
+        /// <summary>清理超过 5 分钟的结果文件（超时或调用方断开后遗留的）。</summary>
+        private static void SweepStale()
+        {
+            try
+            {
+                var cutoff = DateTime.Now.AddMinutes(-5);
+                foreach (var f in Directory.GetFiles(Path.GetTempPath(), "acadclr-lisp-*.out"))
+                    try { if (File.GetLastWriteTime(f) < cutoff) File.Delete(f); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            }
+            catch (IOException) { }
         }
 
         private static Document ActiveDocument() =>

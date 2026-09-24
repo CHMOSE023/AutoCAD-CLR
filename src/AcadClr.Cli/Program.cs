@@ -63,6 +63,7 @@ namespace AcadClr.Cli
                 dwg = pos[0];
                 pos.RemoveAt(0);
             }
+            if (a.GetInt("--timeout") is int timeoutSec) LiveTransport.TimeoutMs = timeoutSec * 1000;
 
             var req = new Request
             {

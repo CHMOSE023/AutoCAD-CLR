@@ -105,6 +105,10 @@ namespace AcadClr.Core
         /// <summary>lisp：走命令队列执行（(command ...) 需要文档上下文时用）。</summary>
         [JsonProperty("commandQueue")] public bool CommandQueue { get; set; }
 
+        /// <summary>实时模式：本次请求的超时（毫秒）；不填用插件默认值（一般 120 秒，打印 180 秒）。</summary>
+        [JsonProperty("timeoutMs", NullValueHandling = NullValueHandling.Ignore)]
+        public int? TimeoutMs { get; set; }
+
         // ---- 以下仅离线模式使用 ----
 
         /// <summary>离线模式要操作的 DWG 路径。</summary>
@@ -216,12 +220,31 @@ namespace AcadClr.Core
         [JsonProperty("data", NullValueHandling = NullValueHandling.Ignore)]
         public JObject? Data { get; set; }
 
+        /// <summary>图片结果（视图截图等），内嵌 base64。</summary>
+        [JsonProperty("images", NullValueHandling = NullValueHandling.Ignore)]
+        public List<ImageData>? Images { get; set; }
+
         /// <summary>请求级错误（连接失败、没有打开的图形等）。</summary>
         [JsonProperty("error", NullValueHandling = NullValueHandling.Ignore)]
         public ErrorInfo? Error { get; set; }
 
         public static Response Fail(string code, string message, string? suggestion = null) =>
             new Response { Ok = false, Error = new ErrorInfo { Code = code, Message = message, Suggestion = suggestion } };
+    }
+
+    public sealed class ImageData
+    {
+        /// <summary>image/png、image/jpeg 等。</summary>
+        [JsonProperty("mimeType")] public string MimeType { get; set; } = "image/png";
+
+        /// <summary>base64 编码的图片内容。</summary>
+        [JsonProperty("data")] public string Data { get; set; } = "";
+
+        [JsonProperty("width", NullValueHandling = NullValueHandling.Ignore)]
+        public int? Width { get; set; }
+
+        [JsonProperty("height", NullValueHandling = NullValueHandling.Ignore)]
+        public int? Height { get; set; }
     }
 
     public static class Json
@@ -281,5 +304,9 @@ namespace AcadClr.Core
         [JsonProperty("pipe")] public string Pipe { get; set; } = "";
         [JsonProperty("acadVersion")] public string AcadVersion { get; set; } = "";
         [JsonProperty("started")] public DateTime Started { get; set; }
+
+        /// <summary>MCP HTTP 服务端口；未启动 HTTP 时为空。</summary>
+        [JsonProperty("httpPort", NullValueHandling = NullValueHandling.Ignore)]
+        public int? HttpPort { get; set; }
     }
 }

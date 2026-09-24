@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using AcadClr.Core;
 using AcadClr.Plugin.Host;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Runtime;
@@ -74,8 +75,14 @@ namespace AcadClr.Plugin
         {
             MainThread.EnsureInstalled();
             var server = new PipeServer(LiveHost.Handle);
-            server.Start(Convert.ToString(CoreApp.GetSystemVariable("ACADVER")) ?? "");
+            server.Start(new InstanceInfo
+            {
+                Pid = Process.GetCurrentProcess().Id,
+                AcadVersion = Convert.ToString(CoreApp.GetSystemVariable("ACADVER")) ?? "",
+                Started = DateTime.Now,
+            });
             _server = server;
+            LispRunner.WarmUp();
             Print("已启动，管道：" + server.PipeName);
             Print("命令行工具：acadclr status");
         }
