@@ -31,6 +31,16 @@ namespace AcadClr.Cli
         /// <summary>离线模式使用的 AutoCAD：命令行 --acad，或 acadclr mcp 的启动参数。</summary>
         public static string? AcadHint { get; set; }
 
+        /// <summary>请求来源，写进请求与操作日志：cli、mcp-stdio、mcp-http。</summary>
+        public static string Source { get; set; } = "cli";
+
+        /// <summary>
+        /// 调用方的策略（acadclr mcp 的 --read-only / --allow-lisp）：拒绝写操作、拒绝 lisp / script。
+        /// 与 AutoCAD 里的只读模式（ACADCLR_READONLY）互相独立，是第二道防线；离线模式同样生效。
+        /// </summary>
+        public static bool ReadOnly { get; set; }
+        public static bool AllowLisp { get; set; } = true;
+
         /// <summary>准备并执行；参数错误也作为 Response 返回（MCP 用）。</summary>
         public static Response Dispatch(string command, JObject? args)
         {
@@ -42,13 +52,50 @@ namespace AcadClr.Cli
             }
         }
 
-        /// <summary>校验参数并构造调用，不连接 AutoCAD。参数有误时抛 <see cref="CliError"/>。</summary>
+        /// <summary>
+        /// 校验参数并构造调用，不连接 AutoCAD。参数有误、被策略拒绝时抛 <see cref="CliError"/>。
+        /// 返回的调用执行时写操作日志（help、instances、log 除外）。
+        /// </summary>
         public static Call Prepare(string command, JObject? rawArgs)
         {
             var cmd = Commands.Require(command);
             if (cmd.CliOnly) throw new CliError("usage", $"{cmd.Name} 只能在命令行使用。");
             var a = Commands.Normalize(cmd, rawArgs);
+            var call = Build(cmd, a);
+            if (call.Request != null) call.Request.Source = Source;
+            Enforce(cmd, a, call);
+            if (cmd.Modes == CommandModes.None) return call;
 
+            var run = call.Execute;
+            call.Execute = () =>
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var resp = run();
+                OpLog.Write(Source, cmd.Name, a, call, resp, sw.ElapsedMilliseconds);
+                return resp;
+            };
+            return call;
+        }
+
+        /// <summary>调用方策略：只读时拒绝写操作，不允许 LISP 时拒绝 lisp / script。被拒绝的调用也记日志。</summary>
+        private static void Enforce(CommandDef cmd, JObject a, Call call)
+        {
+            CliError? denied = null;
+            if (!AllowLisp && (cmd.Name == "lisp" || cmd.Name == "script"))
+                denied = new CliError("lisp_disabled", $"{cmd.Name} 已被禁用（任意代码执行）。", "acadclr mcp 启动时加 --allow-lisp 才开放；结构化命令不受影响");
+            else if (ReadOnly && Writes(cmd, call.Request))
+                denied = new CliError("read_only", $"只读模式：拒绝会修改图形的 {cmd.Name}。", "查询类命令（get / query / measure / check / view / plot）照常可用");
+            if (denied == null) return;
+            OpLog.Write(Source, cmd.Name, a, call, new Response { Ok = false, Error = denied.ToInfo() }, 0);
+            throw denied;
+        }
+
+        /// <summary>批处理、get 这类请求按条目判定（命令表 + Commands.IsWrite）；其余按命令表的 Writes。</summary>
+        public static bool Writes(CommandDef cmd, Request? req) =>
+            req != null && req.Kind == "run" && req.Items.Count > 0 ? Commands.IsWrite(req) : cmd.Writes;
+
+        private static Call Build(CommandDef cmd, JObject a)
+        {
             var dwg = cmd.Name == "script" ? null : a.GetString("dwg");
             if (dwg != null && a.GetString("doc") != null)
                 throw new CliError("usage", "dwg（离线文件）与 doc（实时模式的文档）不能同时给。");
@@ -228,6 +275,12 @@ namespace AcadClr.Cli
                 case "create":
                     return Offline(new Request { Create = true });
 
+                case "log":
+                {
+                    int lines = a.GetInt("lines") ?? 50;
+                    return new Call { Command = cmd.Name, Execute = () => OpLog.Tail(lines) };
+                }
+
                 case "instances":
                     return new Call
                     {
@@ -314,8 +367,13 @@ namespace AcadClr.Cli
                     Execute = () => CommandEdits.Interpret(OfflineTransport.Lisp(dwg, code, true, AcadHint, offlineTimeout), action.Name),
                 };
             }
-            var live = new Request { Kind = "lisp", Code = code, CommandQueue = true, TimeoutMs = liveTimeoutMs };
-            return new Call { Command = cmd.Name, Request = live, Execute = () => CommandEdits.Interpret(LiveTransport.Send(live, pid), action.Name) };
+            // 实时模式只发参数，插件自己生成代码（插件的 LISP 开关只管外部传来的代码，不影响这类编辑）
+            var live = new Request
+            {
+                Kind = "cmdedit", TimeoutMs = liveTimeoutMs,
+                Items = { new BatchItem { Command = "edit", Action = action.Name, Path = path, Selector = selector, Props = props } },
+            };
+            return new Call { Command = cmd.Name, Request = live, Execute = () => LiveTransport.Send(live, pid) };
         }
 
         private static JArray ReadBatchFile(string path)

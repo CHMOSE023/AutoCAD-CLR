@@ -50,10 +50,11 @@ AcadClr.Cli      acadclr.exe
   Program        命令行参数 → Request（按命令表解析）
   Mcp/           JSON-RPC、新旧协议适配、stdio / HTTP 传输、工具目录（由 Commands 生成，不手写）
   Transports     LiveTransport（管道）/ OfflineTransport（accoreconsole）—— CLI 与 MCP 共用
+  OpLog          操作日志（CLI、MCP、离线的调用都记）
   Output         文本 / JSON 输出（仅 CLI）
 AcadClr.Plugin
   Host/          PipeServer、MainThread（唯一一份）、离线入口、发现文件
-  Safety/        只读模式、自动备份、mark / rollback、操作日志 —— 管道入口统一把关
+  Safety/        只读模式、LISP 开关、写前备份、mark / rollback —— 管道入口统一把关
   Engine/        实体增删改查 + 动作动词（唯一实现，含原先在 CLI 端组装的 trim / fillet / plot）
 ```
 
@@ -179,16 +180,25 @@ AcadClr.Plugin
 
 ## 步骤 3：安全层
 
-插件侧（`Safety/`，所有入口共用）：
-- [ ] 只读模式（拒绝所有写操作）、写操作前自动备份
-- [ ] 写操作判定来自命令表（每个命令 / 动作标注是否写），不按工具逐个维护
-- [ ] mark / rollback 与操作日志
-- [ ] 插件命令统一为 `ACADCLR_*`：`START` / `STOP` / `STATUS` / `READONLY` / `LISP`（开关 lisp / script）/ `MCP`（拉起或停止 `acadclr mcp --http` 子进程）
+插件侧（`Safety/`，管道入口统一把关）：
+- [x] 只读模式（`ACADCLR_READONLY`，拒绝所有写请求，`read_only`）；写前备份（每个文档每次会话首次写之前，
+      复制磁盘文件到 `%LOCALAPPDATA%\AutoCADCLR\backups`，路径通过 `Response.backup` 返回）
+- [x] 写操作判定来自命令表：`Commands.IsWrite(BatchItem / Request)`，插件与 CLI 共用；切换当前文档按只读放行
+- [x] `ACADCLR_LISP` 开关 lisp / script；命令式编辑改为 `cmdedit` 请求，只发参数、由插件用 Core 的 `CommandEdits` 生成代码，
+      所以关闭 LISP 后 trim 等照常可用。开关存 `settings.json`，每个请求重读（改文件立即生效）
+- [x] mark / rollback 移入 `Safety/UndoMarks.cs`
+- [x] **操作日志改在 `acadclr.exe`（`Cli/OpLog.cs`）**：CLI、MCP、离线三条路径都经过 Dispatcher，插件只看得到实时请求。
+      一行一次调用（时间、来源 `Request.source`、目标、命令、结果、耗时、参数摘要、错误、备份）；`acadclr log [N]` 查看；
+      被策略拒绝的调用也记。直接连管道、绕过 acadclr 的客户端不会被记录
+- [ ] `ACADCLR_MCP`（拉起或停止 `acadclr mcp --http` 子进程）：随步骤 4 实现
 
 `acadclr mcp` 侧：
-- [ ] `lisp` / `script` 默认不出现在 `tools/list`，启动参数 `--allow-lisp` 才开放
-- [ ] `--read-only` 启动参数：写类工具不出现在 `tools/list`，调用也拒绝（插件只读模式之外的第二道防线）
-- [ ] HTTP 可选 token 鉴权（`Authorization: Bearer`，`--token` 或环境变量 `ACADCLR_MCP_TOKEN`）；stdio 不需要
+- [x] 策略已在 Dispatcher 实现并有单元测试：`Dispatcher.AllowLisp = false` 拒绝 lisp / script，`Dispatcher.ReadOnly = true` 拒绝写操作
+      （离线同样生效，与插件只读互相独立）；`Dispatcher.Source` 写进请求与日志
+- [ ] 启动参数 `--allow-lisp` / `--read-only` 接到上述策略，并据此过滤 `tools/list`：随步骤 4 实现
+- [ ] HTTP 可选 token 鉴权（`Authorization: Bearer`，`--token` 或环境变量 `ACADCLR_MCP_TOKEN`）；stdio 不需要：随步骤 4 实现
+
+验收：`tests/live.ps1` 增加安全层 11 项（只读、LISP 开关、写前备份、日志），AutoCAD 2020 上 27 项全部通过；单元测试 253 个
 
 ## 步骤 4：`acadclr mcp`
 
@@ -267,7 +277,7 @@ acadclr mcp --http [--port 7140]             # Streamable HTTP，常驻
 | 工具少、`props` 是开放对象，模型可能猜错属性名 | 工具说明引导先调用 `help`；Engine 校验并在错误里给出 `suggestion`（与 CLI 相同） |
 | 多一个进程：HTTP 模式需要常驻 `acadclr mcp` | 推荐 stdio（客户端自动拉起）；HTTP 模式可由 `ACADCLR_MCP` 从 AutoCAD 里拉起，随 AutoCAD 退出 |
 | MCP 走离线模式时每次调用启动 accoreconsole（3–5 秒） | 工具说明提示合并成一次 `batch`；进度用 `notifications/progress` 推送 |
-| 多个 MCP 客户端 / CLI 同时操作同一实例 | 插件主线程串行执行；Safety 的操作日志记录来源（cli / mcp-stdio / mcp-http） |
+| 多个 MCP 客户端 / CLI 同时操作同一实例 | 插件主线程串行执行；操作日志记录来源（cli / mcp-stdio / mcp-http） |
 | 命令行改为按命令表解析后行为变化 | 已用单元测试固定命令行 → 参数的映射；冒烟测试输出与重构前逐行比对（2.1 已通过） |
 | 两份 Layouts / Plot 实现行为不同，移植时丢失 MCP 版的修复 | 逐文件对比；MCP 实测通过的场景都写成测试用例 |
 | 长耗时操作（打印、命令队列桥）超时 | 请求带超时；HTTP 用 SSE 推进度；客户端断开时取消管道请求 |

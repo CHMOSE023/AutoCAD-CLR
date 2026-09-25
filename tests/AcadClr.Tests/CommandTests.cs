@@ -190,13 +190,18 @@ namespace AcadClr.Tests
         }
 
         [Fact]
-        public void 命令式edit生成LISP实时走命令队列()
+        public void 命令式edit实时只发参数由插件生成代码()
         {
             var r = Prepare("edit", "{\"action\":\"fillet\",\"path\":\"8D\",\"props\":{\"with\":\"95\",\"radius\":300}}").Request!;
-            Assert.Equal("lisp", r.Kind);
-            Assert.True(r.CommandQueue);
-            Assert.Contains("._fillet", r.Code);
-            Assert.Contains("\"95\"", r.Code);
+            Assert.Equal("cmdedit", r.Kind);
+            Assert.Null(r.Code);
+            var item = r.Items.Single();
+            Assert.Equal("fillet", item.Action);
+            Assert.Equal("95", (string)item.Props!["with"]!);
+            // 插件用同一个 CommandEdits 生成代码
+            var code = CommandEdits.Build(Schema.FindAction("fillet")!, "8D", Schema.FindAction("fillet")!.CheckProps(item.GetProps()));
+            Assert.Contains("._fillet", code);
+            Assert.Contains("\"95\"", code);
         }
 
         [Fact]

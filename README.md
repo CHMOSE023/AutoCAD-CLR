@@ -53,8 +53,23 @@ AutoCAD 2014 起有 `SECURELOAD` 安全加载机制，只能从受信任位置�
    加载后插件会自动启动服务，并提示管道名。
 2. 在终端运行 `acadclr status` 确认已连接。
 
-插件命令：`ACADCLR_START` / `ACADCLR_STOP` / `ACADCLR_STATUS`。同时打开多个 AutoCAD 时，
-`acadclr instances` 可以列出各个实例，默认连接最近启动的那个，用 `--pid` 指定其他实例。
+插件命令：`ACADCLR_START` / `ACADCLR_STOP` / `ACADCLR_STATUS` / `ACADCLR_READONLY` / `ACADCLR_LISP`（见下文“安全”）。
+同时打开多个 AutoCAD 时，`acadclr instances` 可以列出各个实例，默认连接最近启动的那个，用 `--pid` 指定其他实例。
+
+### 安全
+
+- **只读模式**：在 AutoCAD 里执行 `ACADCLR_READONLY` 切换。开启后插件拒绝一切修改图形的请求（`read_only`），
+  查询、测量、校验、截图、打印照常。开启后远程命令无法再关闭它，只能回到 AutoCAD 里再执行一次。
+- **LISP 开关**：`ACADCLR_LISP` 切换是否接受 `lisp` / `script`（任意代码执行，关闭时返回 `lisp_disabled`）。
+  trim、fillet 这类命令式编辑由插件自己生成代码，不受影响。
+- 两个开关保存在 `%LOCALAPPDATA%\AutoCADCLR\settings.json`，重启后仍然有效，`acadclr status` 显示当前状态。
+  它们防的是误操作，不是恶意绕过：能改文件的程序也能改这个设置。
+- **写前备份**：每张图在本次 AutoCAD 会话里第一次被 acadclr 修改之前，插件把磁盘上最后保存的版本复制到
+  `%LOCALAPPDATA%\AutoCADCLR\backups`（结果里的 `backup` 字段给出路径）。从未存盘的新图没有可备份的文件。
+- **撤销**：每次 acadclr 修改是 AutoCAD 里的一个撤销步（名为 ACADCLR），`acadclr undo` 或在 AutoCAD 里 Ctrl+Z 都能撤销；
+  试探性修改前 `acadclr mark`，不满意 `acadclr rollback`。
+- **操作日志**：每次调用（命令行、MCP、离线）记一行到 `%LOCALAPPDATA%\AutoCADCLR\logs\acadclr-日期.log`：
+  时间、来源、目标、命令、结果、耗时、参数摘要、错误与备份位置。`acadclr log 50` 查看最近 50 行。
 
 ## 离线模式
 
@@ -101,6 +116,7 @@ acadclr stats plan.dwg
 | `save [--as path]` | 保存（实时模式） |
 | `create <file.dwg>` | 新建空白 DWG（离线，单位默认 mm） |
 | `instances` | 列出加载了插件的 AutoCAD 实例 |
+| `log [N]` | 查看操作日志的最后 N 行 |
 | `help [type\|命令] [--json]` | 查看类型的属性，或命令的参数（命令行写法与 JSON / MCP 参数名对照） |
 
 全局选项：`--json`、`--dwg`、`--acad`、`--pid`、`--doc`（实时模式下操作指定的已打开文档，不必先切换）、`--timeout`。其余选项属于各自的命令（`--best-effort`、`--stop-on-error` 只用于 `batch`，
@@ -260,8 +276,8 @@ acadclr add /model --type leader --prop points="0,0;500,500;1200,500" --prop tex
 
 ## 路线图
 
-- 图块定义与列表、系统变量、多文档、单位换算、测量、撤销 / 标记回滚（第 3 批）
-- `view png`：截图反馈
+进度见 [合并计划](docs/PLAN-merge-mcp.md)：
+
+- `acadclr mcp`：MCP server（stdio / Streamable HTTP），工具与命令一一对应，由命令表生成（步骤 4）
+- 从 AutoCadMCP 迁移：[对照表](docs/migrate-from-autocad-mcp.md)
 - `dump`：把现有图纸导出成可重放的 batch JSON
-- 空间校验（重叠 / 越界 / 相邻）—— 可以从 AutoCADMCP 迁移过来
-- MCP 端点：只暴露一个通用 `command` 工具

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using AcadClr.Core;
 using AcadClr.Plugin.Engine;
+using AcadClr.Plugin.Safety;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Newtonsoft.Json.Linq;
@@ -33,6 +34,20 @@ namespace AcadClr.Plugin.Host
         private static Response HandleCore(Request req, CancellationToken ct)
         {
             int timeout = req.TimeoutMs is int t && t > 0 ? t : DefaultTimeoutMs;
+            if (req.Kind != "ping" && Guard.Check(req) is Response denied) return denied;
+
+            // 写操作前：该文档本次会话第一次被写时，先备份磁盘上的文件（打开 / 关闭文档本身不备份）
+            string? backup = null;
+            if (Commands.IsWrite(req) && !req.Items.Any(Documents.Targets))
+                backup = MainThread.Invoke(() => Guard.BackupOnce(Documents.Resolve(req.Doc)), 10_000, ct);
+
+            var resp = Dispatch(req, timeout, ct);
+            if (backup != null) resp.Backup = backup;
+            return resp;
+        }
+
+        private static Response Dispatch(Request req, int timeout, CancellationToken ct)
+        {
             switch (req.Kind)
             {
                 case "ping":
@@ -57,6 +72,17 @@ namespace AcadClr.Plugin.Host
                 case "undo":
                     // 请求线程：内部等待命令队列执行完，不能占用主线程
                     return UndoMarks.Run(req, timeout, ct);
+                case "cmdedit":
+                {
+                    // trim / extend / fillet / chamfer：插件按参数自己生成 (vl-cmdf ...)，不接受外部传来的代码，
+                    // 所以关闭 LISP 开关时这类编辑照样可用
+                    var item = req.Items.FirstOrDefault() ?? throw new CliError("bad_request", "cmdedit 请求缺少内容。");
+                    var action = Schema.RequireAction("edit", item.Action);
+                    if (!action.UsesCommand) throw new CliError("bad_request", $"edit {action.Name} 不是命令式动作。");
+                    var target = item.Path ?? item.Selector ?? throw new CliError("invalid_request", $"edit {action.Name} 缺少目标。");
+                    var code = CommandEdits.Build(action, target, action.CheckProps(item.GetProps()));
+                    return CommandEdits.Interpret(LispRunner.ViaCommandQueue(code, timeout, ct), action.Name);
+                }
                 case "view":
                     return MainThread.Invoke(() =>
                     {
@@ -82,7 +108,7 @@ namespace AcadClr.Plugin.Host
             // acadclr undo 1 / 用户按 Ctrl+Z 正好撤销上一次操作；不带命令名时修改不单独成组，UNDO 1 撤不到它。
             // 只读请求不加锁（应用程序上下文里读数据库不需要锁）：实测任何文档锁都会留下一个撤销步，
             // 查询之后按一次 Ctrl+Z 就会撤了个空
-            bool mutating = req.Items.Any(i => i.Verb == "add" || i.Verb == "set" || i.Verb == "remove" || i.Verb == "edit");
+            bool mutating = req.Items.Any(Commands.IsWrite);
             if (!mutating) resp = exec.Run(req);
             else using (doc.LockDocument(DocumentLockMode.Write, "ACADCLR", "ACADCLR", false)) resp = exec.Run(req);
 
@@ -104,7 +130,11 @@ namespace AcadClr.Plugin.Host
                 ["acadVersion"] = Convert.ToString(CoreApp.GetSystemVariable("ACADVER")),
                 ["documents"] = dm.Count,
                 ["activeDocument"] = doc?.Name,
+                ["readOnly"] = Guard.ReadOnly,
+                ["allowLisp"] = Guard.AllowLisp,
             };
+            var backups = Guard.BackupList().ToList();
+            if (backups.Count > 0) data["backups"] = new JArray(backups);
             if (doc != null)
             {
                 using (var tr = doc.Database.TransactionManager.StartTransaction())

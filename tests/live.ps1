@@ -88,6 +88,52 @@ Remove-Item $pdf -ErrorAction SilentlyContinue
 Run @("plot", "--prop", "output=$pdf", "--prop", "area=extents") | Out-Null
 Check "plot 打印 PDF" (Test-Path $pdf)
 
+# 安全层：只读模式、LISP 开关、写前备份、操作日志。
+# 开关由 AutoCAD 命令切换；开启后远程无法再用命令关闭（script 本身被拒），测试直接改设置文件恢复，结束时还原原样
+$settings = Join-Path $env:LOCALAPPDATA "AutoCADCLR\settings.json"
+$origSettings = if (Test-Path $settings) { Get-Content $settings -Raw } else { $null }
+function SetSettings([bool]$ro, [bool]$lisp) {
+    Set-Content $settings ('{"readOnly":' + $ro.ToString().ToLower() + ',"allowLisp":' + $lisp.ToString().ToLower() + '}') -Encoding UTF8
+}
+function WaitStatus([string]$field, $value) {
+    for ($i = 0; $i -lt 20; $i++) { if ((Json @("status")).data.$field -eq $value) { return $true }; Start-Sleep -Milliseconds 300 }
+    return $false
+}
+SetSettings $false $true
+Run @("script", "--text", "ACADCLR_READONLY`n") | Out-Null
+Check "ACADCLR_READONLY 开启只读" (WaitStatus "readOnly" $true)
+$w = Json @("add", "/model", "--type", "circle", "--prop", "center=0,0", "--prop", "radius=1")
+Check "只读时拒绝写" ((-not $w.ok) -and $w.error.code -eq "read_only")
+Check "只读时查询照常" ((Json @("query", "circle")).ok -and (Json @("view", "zoom")).ok)
+$s = Json @("script", "--text", "ACADCLR_READONLY`n")
+Check "只读时 script 也被拒（不能远程关闭只读）" ((-not $s.ok) -and $s.error.code -eq "read_only")
+SetSettings $false $true
+Check "改设置文件立即生效" ((Json @("add", "/model", "--type", "circle", "--prop", "center=0,0", "--prop", "radius=2")).ok)
+
+Run @("script", "--text", "ACADCLR_LISP`n") | Out-Null
+Check "ACADCLR_LISP 禁止 LISP" (WaitStatus "allowLisp" $false)
+$l = Json @("lisp", "(+ 1 2)")
+Check "禁止时拒绝 lisp" ((-not $l.ok) -and $l.error.code -eq "lisp_disabled")
+$ta = (Json @("add", "/model", "--type", "line", "--prop", "start=0,30000", "--prop", "end=10000,30000")).items[0].node.props.handle
+$tb = (Json @("add", "/model", "--type", "line", "--prop", "start=5000,29000", "--prop", "end=5000,31000")).items[0].node.props.handle
+Run @("edit", "trim", "$ta@8000,30000", "--prop", "edges=$tb") | Out-Null
+Check "禁止 LISP 时命令式编辑照常（插件自己生成代码）" ((Json @("get", "/entity[@handle=$ta]")).items[0].node.props.end -eq "5000,30000")
+SetSettings $false $true
+
+# 插件按文件路径记录“本次会话已备份”，每轮用新文件名
+$saved = Join-Path $out ("live-backup-" + (Get-Date -Format "HHmmss") + ".dwg")
+Run @("save", "--as", $saved) | Out-Null
+Check "save --as 后文档改为新文件名" ((Json @("status")).data.activeDocument -eq $saved)
+$doc = Split-Path $saved -Leaf
+$b1 = Json @("add", "/model", "--type", "circle", "--prop", "center=0,0", "--prop", "radius=3")
+$b2 = Json @("add", "/model", "--type", "circle", "--prop", "center=0,0", "--prop", "radius=4")
+Check "首次写前备份磁盘文件，之后不再备份" ($b1.backup -and (Test-Path $b1.backup) -and -not $b2.backup)
+if ($b1.backup) { Remove-Item $b1.backup -ErrorAction SilentlyContinue }
+$lg = (Json @("log", "20")).data.lines
+Check "操作日志记下调用与拒绝" (($lg | Where-Object { $_ -match " add " -and $_ -match "read_only" }).Count -ge 1 -and ($lg | Where-Object { $_ -match "backup=" }).Count -ge 1)
+
+if ($origSettings -ne $null) { Set-Content $settings $origSettings -NoNewline -Encoding UTF8 } else { Remove-Item $settings -ErrorAction SilentlyContinue }
+
 # 收尾：丢弃并关闭临时图纸
 $rm = Json @("remove", "/document[@name=$doc]")
 Check "有修改时拒绝关闭" ((-not $rm.ok) -or $rm.items[0].status -eq "failed")

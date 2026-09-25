@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using AcadClr.Core;
 using AcadClr.Plugin.Host;
+using AcadClr.Plugin.Safety;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Runtime;
 using CoreApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
@@ -50,8 +51,22 @@ namespace AcadClr.Plugin
         }
 
         [CommandMethod("ACADCLR_STATUS")]
-        public void Status() =>
+        public void Status()
+        {
             Print(_server != null ? "运行中，管道：" + _server.PipeName : "未运行（ACADCLR_START 启动）。");
+            Print($"只读模式：{(Guard.ReadOnly ? "开" : "关")}（ACADCLR_READONLY 切换）；LISP / 脚本：{(Guard.AllowLisp ? "允许" : "禁止")}（ACADCLR_LISP 切换）");
+            foreach (var b in Guard.BackupList()) Print("已备份：" + b);
+        }
+
+        /// <summary>切换只读模式：开启后拒绝一切修改图形的请求，查询照常。</summary>
+        [CommandMethod("ACADCLR_READONLY")]
+        public void ReadOnly() =>
+            Print(Guard.ToggleReadOnly() ? "只读模式已开启：拒绝修改图形的请求。再次执行 ACADCLR_READONLY 关闭。" : "只读模式已关闭。");
+
+        /// <summary>切换是否允许 lisp / script（任意代码执行）；命令式编辑（trim 等）不受影响。</summary>
+        [CommandMethod("ACADCLR_LISP")]
+        public void Lisp() =>
+            Print(Guard.ToggleLisp() ? "已允许 lisp / script。" : "已禁止 lisp / script（任意代码执行）。结构化命令不受影响。");
 
         /// <summary>离线模式入口：accoreconsole 脚本调用，参数为请求文件路径。</summary>
         [CommandMethod("ACADCLR_RUN")]

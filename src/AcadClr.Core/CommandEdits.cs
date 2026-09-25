@@ -4,9 +4,8 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using AcadClr.Core;
 
-namespace AcadClr.Cli
+namespace AcadClr.Core
 {
     /// <summary>
     /// trim / extend / fillet / chamfer：交互式命令，需要文档上下文。沿用 AutoCADMCP 的做法，
@@ -16,7 +15,7 @@ namespace AcadClr.Cli
     /// 修剪、延伸、倒角都靠这个点判断处理哪一段。也接受 /entity[@handle=..] 形式的路径。
     /// 执行前后会临时修改 TRIMMODE 等系统变量，结束后恢复原值。
     /// </summary>
-    internal static class CommandEdits
+    public static class CommandEdits
     {
         private static readonly Regex HandleInPath = new Regex(@"@handle=([0-9A-Fa-f]+)", RegexOptions.Compiled);
         private static readonly Regex BareRef = new Regex(@"^([0-9A-Fa-f]+)(?:@(-?[\d.]+),(-?[\d.]+))?$", RegexOptions.Compiled);

@@ -35,6 +35,15 @@ namespace AcadClr.Cli
                 return resp.Error.Code == "lisp_error" ? 1 : 2;
             }
 
+            if (resp.Backup != null) Console.WriteLine("已备份原文件：" + resp.Backup + "（本次会话首次修改该图）");
+
+            if (verb == "log" && resp.Data?["lines"] is Newtonsoft.Json.Linq.JArray logLines)
+            {
+                if (logLines.Count == 0) Console.WriteLine("还没有操作日志（目录：" + resp.Data["dir"] + "）");
+                foreach (var l in logLines) Console.WriteLine(l);
+                return 0;
+            }
+
             if (verb == "instances" && resp.Data?["instances"] is Newtonsoft.Json.Linq.JArray list)
             {
                 if (list.Count == 0) { Console.WriteLine("没有加载了 AutoCADCLR 插件的 AutoCAD 实例。"); return 0; }

@@ -232,6 +232,9 @@ namespace AcadClr.Core
             new CommandDef("create", "create <file.dwg>", "新建空白 DWG（离线）", CommandModes.Offline, true,
                 A("dwg", ArgKind.String, "新文件路径（已存在则报错）", pos: 0, required: true)),
 
+            new CommandDef("log", "log [N]", "查看操作日志的最后 N 行（每次调用的时间、来源、命令、结果、耗时）", CommandModes.None, false,
+                A("lines", ArgKind.Integer, "行数 1-2000", pos: 0, def: "50")),
+
             new CommandDef("instances", "instances", "列出加载了插件的 AutoCAD 实例", CommandModes.None, false),
 
             new CommandDef("help", "help [type|命令]", "查看类型、命令的参数与属性", CommandModes.None, false,
@@ -240,6 +243,35 @@ namespace AcadClr.Core
             new CommandDef("config", "config [acad <年份|auto>]", "查看或设置离线模式默认使用的 AutoCAD 版本", CommandModes.None, false,
                 new ArgDef("args", ArgKind.StringList, "配置项与值") { Position = 0, Rest = true }) { CliOnly = true },
         };
+
+        /// <summary>batch 中的一条操作是否修改图形（按命令表；未知动词按写处理）。</summary>
+        public static bool IsWrite(BatchItem item)
+        {
+            // 切换当前文档不改图形（AutoCADMCP 的只读模式同样放行 activate_document）
+            if (item.Verb == "set" && (item.Path ?? "").StartsWith("/document[", StringComparison.OrdinalIgnoreCase) &&
+                item.GetProps().All(kv => kv.Key.Equals("current", StringComparison.OrdinalIgnoreCase)))
+                return false;
+            return Find(item.Verb)?.Writes ?? true;
+        }
+
+        /// <summary>
+        /// 发给插件的请求是否修改图形。插件的只读模式、写前备份据此判断：
+        /// plot、view、status 只读；lisp、script、命令式编辑、撤销、保存按写处理（无法预知 LISP 做什么）。
+        /// </summary>
+        public static bool IsWrite(Request req)
+        {
+            switch (req.Kind)
+            {
+                case "run": return req.Items.Any(IsWrite);
+                case "status":
+                case "plot":
+                case "view":
+                case "ping":
+                    return false;
+                default:
+                    return true;
+            }
+        }
 
         public static CommandDef? Find(string name) =>
             All.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));

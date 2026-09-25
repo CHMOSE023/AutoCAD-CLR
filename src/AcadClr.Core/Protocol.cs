@@ -83,8 +83,12 @@ namespace AcadClr.Core
     /// <summary>发往插件的一次请求。实时模式走命名管道，离线模式写成文件交给 accoreconsole。</summary>
     public sealed class Request
     {
-        /// <summary>run | status | save | lisp | script | plot | view | undo | ping</summary>
+        /// <summary>run | status | save | lisp | script | cmdedit | plot | view | undo | ping</summary>
         [JsonProperty("kind")] public string Kind { get; set; } = "run";
+
+        /// <summary>请求来源：cli、mcp-stdio、mcp-http。用于日志与排查。</summary>
+        [JsonProperty("source", NullValueHandling = NullValueHandling.Ignore)]
+        public string? Source { get; set; }
 
         [JsonProperty("items")] public List<BatchItem> Items { get; set; } = new List<BatchItem>();
 
@@ -215,6 +219,10 @@ namespace AcadClr.Core
         /// <summary>false：本批含外部参照等数据库级操作，逐条执行、不支持回滚。</summary>
         [JsonProperty("atomic", NullValueHandling = NullValueHandling.Ignore)]
         public bool? Atomic { get; set; }
+
+        /// <summary>实时模式：本次写操作前，插件把该文档磁盘上的文件备份到了这里（每个文档每次会话一次）。</summary>
+        [JsonProperty("backup", NullValueHandling = NullValueHandling.Ignore)]
+        public string? Backup { get; set; }
 
         /// <summary>离线模式：改动已写回 DWG。</summary>
         [JsonProperty("saved", NullValueHandling = NullValueHandling.Ignore)]

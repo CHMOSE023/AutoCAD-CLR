@@ -135,3 +135,6 @@ acadclr script fix.scr "D:/drawings/*.dwg" --save              # 离线，批量
 - 实时模式的修改不会自动保存，完成后运行 `acadclr save`；新图用 `acadclr save --as <path>`。
 - 加 `--json` 可以得到结构化输出。出错时读 `error.code` 和 `error.suggestion` 自行修正。
 - 常见错误码：`not_found`、`invalid_value`、`unsupported_property`、`missing_property`、`locked_layer`、`unscoped_selector`、`too_many`。
+- `read_only`：用户在 AutoCAD 里开了只读模式（或 MCP 以只读启动）。不要尝试绕过，告诉用户需要修改、请他执行 ACADCLR_READONLY；查询照常可用。
+- `lisp_disabled`：LISP / 脚本被禁用。改用结构化命令（多数需求都有），确实需要时请用户执行 ACADCLR_LISP。
+- 结果里出现 `backup` 时，插件已在修改前备份了原文件；出了问题可以告诉用户备份位置。`acadclr log` 能看到最近做过什么。

@@ -3,11 +3,12 @@ using System.Globalization;
 using System.Linq;
 using System.Threading;
 using AcadClr.Core;
+using AcadClr.Plugin.Host;
 using Autodesk.AutoCAD.ApplicationServices;
 using Newtonsoft.Json.Linq;
 using CoreApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
 
-namespace AcadClr.Plugin.Host
+namespace AcadClr.Plugin.Safety
 {
     /// <summary>
     /// mark / rollback / undo（仅实时模式，作用于当前文档）。移植自 AutoCADMCP，对应 AutoCAD 的 UNDO Mark / Back / N。
