@@ -1,0 +1,16 @@
+[
+  {"command":"add","parent":"/model","type":"polyline","props":{"points":"0,0;2500,0;2500,5300;0,5300","closed":true,"layer":"PARK"}},
+  {"command":"add","parent":"/model","type":"line","props":{"start":"0,0","end":"2500,5300","layer":"PARK"}},
+  {"command":"add","parent":"/blocks","type":"block","props":{"name":"车位","entities":"$0;$1","base":"1250,0","description":"2.5x5.3 车位，基点在底边中点"}},
+  {"command":"add","parent":"/model","type":"insert","props":{"name":"车位","position":"10000,0","layer":"PARK"}},
+  {"command":"add","parent":"/model","type":"insert","props":{"name":"车位","position":"12500,0","rotation":180,"layer":"PARK"}},
+  {"command":"get","path":"/block[@name=车位]"},
+  {"command":"add","parent":"/model","type":"circle","props":{"center":"0,10000","radius":1500,"layer":"TREE"}},
+  {"command":"add","parent":"/blocks","type":"block","props":{"name":"树","entities":"$6","base":"0,10000","replace":true}},
+  {"command":"query","selector":"insert[name=树]"},
+  {"command":"add","parent":"/linetypes","type":"linetype","props":{"name":"DASHED"}},
+  {"command":"add","parent":"/layers","type":"layer","props":{"name":"AXIS","linetype":"CENTER"}},
+  {"command":"query","selector":"linetype[name~=DASH]"},
+  {"command":"set","path":"/block[@name=车位]","props":{"name":"PARK-2.5x5.3"}},
+  {"command":"get","path":"/blocks"}
+]

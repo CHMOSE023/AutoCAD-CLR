@@ -152,7 +152,9 @@ AcadClr.Plugin
 - [x] 测量校验：`measure distance|area|length|convert`、`check overlap|inside|adjacent`（Engine/Inspect.cs，只读、可进 batch）；
       `measure area|length` 对多个实体给出合计，是 MCP 版没有的；check 判定逻辑与 MCP 版相同（包围盒、容差 1）
 - [ ] 视图
-- [ ] 块与线型
+- [x] 块与线型：`/blocks`、`/block[@name=]`（get / query / add 定义 / set 改名 / remove 未被参照的），`add --type block` 用已有实体定义块、
+      `replace=true` 原地替换；`/linetypes`（get / query / add 加载 / remove 未被使用的）；`insert` 新增 `attributes`，插入时按定义补建属性。
+      参照数改为扫描实体统计（`GetBlockReferenceIds` 看不到同一事务里刚插入的参照）；当前图层沿用已有的 `set / --prop currentLayer=`
 - [ ] 系统
 - [ ] 文档
 - [ ] 撤销与日志

@@ -324,6 +324,27 @@ namespace AcadClr.Plugin.Engine
                 case TargetKind.Xref:
                     node = Xrefs.Node(_db, _tr, (BlockTableRecord)_tr.GetObject(t.Id, OpenMode.ForRead));
                     break;
+                case TargetKind.Blocks:
+                    var bs = Symbols.Blocks(_db, _tr).ToList();
+                    node = new Node { Path = "/blocks", Type = "blocks", Props = { ["count"] = bs.Count.ToString() } };
+                    if ((item.Depth ?? 1) >= 1)
+                    {
+                        var refs = Symbols.ReferenceCounts(_db, _tr);
+                        node.Children = bs.Take(limit).Select(b => Symbols.Block(_tr, b, refs)).ToList();
+                        if (bs.Count > limit) node.ChildCount = bs.Count;
+                    }
+                    break;
+                case TargetKind.Block:
+                    node = Symbols.Block(_tr, (BlockTableRecord)_tr.GetObject(t.Id, OpenMode.ForRead));
+                    break;
+                case TargetKind.Linetypes:
+                    var lts = Symbols.Linetypes(_db, _tr).ToList();
+                    node = new Node { Path = "/linetypes", Type = "linetypes", Props = { ["count"] = lts.Count.ToString() } };
+                    if ((item.Depth ?? 1) >= 1) node.Children = lts.Select(l => Symbols.Linetype(_db, l)).ToList();
+                    break;
+                case TargetKind.Linetype:
+                    node = Symbols.Linetype(_db, (LinetypeTableRecord)_tr.GetObject(t.Id, OpenMode.ForRead));
+                    break;
                 case TargetKind.Layouts:
                     var ls = Layouts.All(_db, _tr);
                     node = new Node { Path = "/layouts", Type = "layouts", Props = { ["count"] = ls.Count.ToString(), ["current"] = Layouts.CurrentName() } };
@@ -415,6 +436,17 @@ namespace AcadClr.Plugin.Engine
                 return list;
             }
 
+            if (sel.Type == "block" || sel.Type == "linetype")
+            {
+                var refs = sel.Type == "block" ? Symbols.ReferenceCounts(_db, _tr) : null;
+                var nodes = sel.Type == "block"
+                    ? Symbols.Blocks(_db, _tr).Select(b => Symbols.Block(_tr, b, refs!))
+                    : Symbols.Linetypes(_db, _tr).Select(l => Symbols.Linetype(_db, l));
+                foreach (var n in nodes)
+                    if (sel.Matches(n.Type, a => Prop(n, a))) list.Add(n);
+                return list;
+            }
+
             if (sel.Type == "layout")
             {
                 foreach (var l in Layouts.All(_db, _tr))
@@ -485,6 +517,21 @@ namespace AcadClr.Plugin.Engine
                 if (parent.Kind != TargetKind.Layers && parent.Kind != TargetKind.Document)
                     throw new CliError("invalid_path", "图层的父路径应为 /layers。");
                 Done(r, Nodes.Layer(_db, _tr, Mutate.CreateLayer(_db, _tr, props)));
+                return;
+            }
+
+            if (type.Name == "block")
+            {
+                if (parent.Kind != TargetKind.Blocks && parent.Kind != TargetKind.Document)
+                    throw new CliError("invalid_path", "图块的父路径应为 /blocks。");
+                Done(r, Symbols.Block(_tr, Symbols.CreateBlock(_db, _tr, props, s => EntityRef(s, prior))));
+                return;
+            }
+            if (type.Name == "linetype")
+            {
+                if (parent.Kind != TargetKind.Linetypes && parent.Kind != TargetKind.Document)
+                    throw new CliError("invalid_path", "线型的父路径应为 /linetypes。");
+                Done(r, Symbols.Linetype(_db, Symbols.LoadLinetype(_db, _tr, props)));
                 return;
             }
 
@@ -641,8 +688,13 @@ namespace AcadClr.Plugin.Engine
                         Mutate.ApplyEntity(_db, _tr, e, Nodes.SchemaOf(Nodes.TypeOf(e)), props, Verbs.Set);
                         Collect(r, Nodes.Entity(_tr, e));
                         break;
+                    case TargetKind.Block:
+                        var blk = (BlockTableRecord)_tr.GetObject(t.Id, OpenMode.ForRead);
+                        Symbols.ApplyBlock(_tr, blk, props);
+                        Collect(r, Symbols.Block(_tr, blk));
+                        break;
                     default:
-                        throw new CliError("invalid_path", $"{t.Kind} 不能直接 set。", "可 set 的目标：/、实体、图层");
+                        throw new CliError("invalid_path", $"{t.Kind} 不能直接 set。", "可 set 的目标：/、实体、图层、图块");
                 }
             }
         }
@@ -678,6 +730,16 @@ namespace AcadClr.Plugin.Engine
                         var l = (LayerTableRecord)_tr.GetObject(t.Id, OpenMode.ForRead);
                         removed.Add(new Node { Path = Nodes.LayerPath(l.Name), Type = "layer" });
                         Mutate.RemoveLayer(_db, _tr, l);
+                        break;
+                    case TargetKind.Block:
+                        var blk = (BlockTableRecord)_tr.GetObject(t.Id, OpenMode.ForRead);
+                        removed.Add(new Node { Path = Symbols.BlockPath(blk.Name), Type = "block" });
+                        Symbols.RemoveBlock(_db, _tr, blk);
+                        break;
+                    case TargetKind.Linetype:
+                        var ltr = (LinetypeTableRecord)_tr.GetObject(t.Id, OpenMode.ForRead);
+                        removed.Add(new Node { Path = Symbols.LinetypePath(ltr.Name), Type = "linetype" });
+                        Symbols.RemoveLinetype(_db, ltr);
                         break;
                     default:
                         throw new CliError("invalid_path", $"{t.Kind} 不能删除。");
@@ -753,7 +815,7 @@ namespace AcadClr.Plugin.Engine
 
         // ------------------------------------------------------------------ 路径解析
 
-        private enum TargetKind { Document, Model, Layers, Layer, Entity, Xrefs, Xref, Layouts, Layout, Devices, Device }
+        private enum TargetKind { Document, Model, Layers, Layer, Entity, Xrefs, Xref, Layouts, Layout, Devices, Device, Blocks, Block, Linetypes, Linetype }
 
         private readonly struct Target
         {
@@ -811,6 +873,20 @@ namespace AcadClr.Plugin.Engine
                     return ResolveInLayout(segs.Skip(1).ToList(), path);
                 case "layout":
                     return ResolveInLayout(segs, path);
+                case "blocks":
+                    if (segs.Count == 1) return new Target(TargetKind.Blocks, ObjectId.Null);
+                    if (segs.Count == 2 && segs[1].Name == "block") return new Target(TargetKind.Block, ResolveBlock(segs[1], path));
+                    break;
+                case "block":
+                    if (segs.Count == 1) return new Target(TargetKind.Block, ResolveBlock(head, path));
+                    break;
+                case "linetypes":
+                    if (segs.Count == 1) return new Target(TargetKind.Linetypes, ObjectId.Null);
+                    if (segs.Count == 2 && segs[1].Name == "linetype") return new Target(TargetKind.Linetype, ResolveLinetype(segs[1], path));
+                    break;
+                case "linetype":
+                    if (segs.Count == 1) return new Target(TargetKind.Linetype, ResolveLinetype(head, path));
+                    break;
                 case "devices":
                     if (segs.Count == 1) return new Target(TargetKind.Devices, ObjectId.Null);
                     if (segs.Count == 2 && segs[1].Name == "device") return ResolveDevice(segs[1], path);
@@ -821,7 +897,7 @@ namespace AcadClr.Plugin.Engine
             }
             throw new CliError("invalid_path", $"无法识别的路径：{path}",
                 "可用：/  /model  /model/<type>[N]  /entity[@handle=H]  /layers  /layer[@name=N]  /xrefs  /xref[@name=N]  " +
-                "/layouts  /layout[@name=N]  /layout[@name=N]/<type>[N]  /devices  /device[@name=N]");
+                "/layouts  /layout[@name=N]  /layout[@name=N]/<type>[N]  /blocks  /block[@name=N]  /linetypes  /linetype[@name=N]  /devices  /device[@name=N]");
         }
 
         /// <summary>/layout[@name=X] 或 /layout[@name=X]/&lt;type&gt;[N|@handle=H]。</summary>
@@ -927,6 +1003,33 @@ namespace AcadClr.Plugin.Engine
                 throw new CliError("invalid_path", $"句柄 “{hex}” 不是十六进制数。");
             try { return _db.GetObjectId(false, new Handle(v), 0); }
             catch (AcRx.Exception) { return ObjectId.Null; }
+        }
+
+        private ObjectId ResolveBlock(PathSegment seg, string whole) =>
+            ResolveNamed(seg, whole, "图块", Symbols.Blocks(_db, _tr).Select(b => (b.Name, b.ObjectId)));
+
+        private ObjectId ResolveLinetype(PathSegment seg, string whole) =>
+            ResolveNamed(seg, whole, "线型", Symbols.Linetypes(_db, _tr).Select(l => (l.Name, l.ObjectId)));
+
+        /// <summary>按 [@name=...] 或 [N] 定位图块、线型这类命名对象。</summary>
+        private static ObjectId ResolveNamed(PathSegment seg, string whole, string what, IEnumerable<(string name, ObjectId id)> items)
+        {
+            var all = items.ToList();
+            if (seg.AttrName == "name")
+            {
+                var hit = all.FirstOrDefault(x => x.name.Equals(seg.AttrValue ?? "", StringComparison.OrdinalIgnoreCase));
+                if (!hit.id.IsNull) return hit.id;
+                var near = Schema.Suggest(seg.AttrValue ?? "", all.Select(x => x.name));
+                throw new CliError("not_found", $"{what} “{seg.AttrValue}” 不存在。",
+                    near != null ? $"是否想用 {near}？" : all.Count == 0 ? $"当前图形没有{what}。" : "现有：" + string.Join("、", all.Select(x => x.name).Take(30)));
+            }
+            if (seg.Index != null)
+            {
+                int idx = seg.Index == -1 ? all.Count : seg.Index.Value;
+                if (idx < 1 || idx > all.Count) throw new CliError("not_found", $"{whole}：只有 {all.Count} 个{what}。");
+                return all[idx - 1].id;
+            }
+            throw new CliError("invalid_path", $"{what}需要用 [N] 或 [@name=...] 定位：{whole}");
         }
 
         private ObjectId ResolveLayer(PathSegment seg, string whole)

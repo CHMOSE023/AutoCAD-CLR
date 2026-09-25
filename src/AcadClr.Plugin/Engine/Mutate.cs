@@ -112,6 +112,7 @@ namespace AcadClr.Plugin.Engine
             if (b.Key != null) basePt = Acad.Pt("base", b.Value);
 
             bool textTouched = false;
+            string? attributes = null;
             foreach (var kv in Order(type, props))
             {
                 string key = type.Find(kv.Key)!.Name, v = kv.Value;
@@ -208,9 +209,14 @@ namespace AcadClr.Plugin.Engine
                         else if (key == "position") br.Position = Acad.Pt(key, v);
                         else if (key == "scale") br.ScaleFactors = new Scale3d(Values.Positive(key, v));
                         else if (key == "rotation") br.Rotation = Values.DegToRad(Values.Double(key, v));
+                        else if (key == "attributes") attributes = v;
                         break;
                 }
             }
+
+            // 块属性在位置、比例、旋转都设好之后再建 / 改：属性引用按块参照的变换定位
+            if (e is BlockReference bref && (verb == Verbs.Add || attributes != null))
+                Symbols.SyncAttributes(tr, bref, attributes, verb == Verbs.Add);
 
             // 非左对齐的单行文字要按对齐点重新计算插入点，否则显示位置不对
             if (textTouched && e is DBText dt && dt.Justify != AttachmentPoint.BaseLeft)

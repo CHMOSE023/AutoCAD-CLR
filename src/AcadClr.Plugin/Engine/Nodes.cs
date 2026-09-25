@@ -196,6 +196,7 @@ namespace AcadClr.Plugin.Engine
                         ? Values.Num(s.X)
                         : Values.Pt(s.X, s.Y, 0) + "," + Values.Num(s.Z);
                     p["rotation"] = Values.Num(Values.RadToDeg(br.Rotation));
+                    if (br.AttributeCollection.Count > 0) p["attributes"] = Symbols.AttributesOf(tr, br);
                     break;
             }
 

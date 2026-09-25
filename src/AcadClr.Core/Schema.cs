@@ -187,7 +187,9 @@ namespace AcadClr.Core
                 P("position", "point", Verbs.All, "插入点", "position=0,0", true),
                 P("scale", "number", Verbs.All, "统一比例（get 时非统一比例返回 x,y,z）", "scale=1"),
                 P("rotation", "angle", Verbs.All, "旋转角（度）", "rotation=0"),
-            }, "acadclr add /model --type insert --prop name=DOOR --prop position=1000,0 --prop layer=DOOR"),
+                P("attributes", "string", Verbs.All, "属性值 TAG=值;TAG=值；add 时按块定义补建属性，未给的取默认值", "attributes=NO=A-01;AREA=36"),
+            }, "acadclr add /model --type insert --prop name=DOOR --prop position=1000,0 --prop layer=DOOR",
+               "acadclr get /blocks                        # 先看块的 bboxFromBase：插入点 + 该范围 = 实际占位"),
 
             Entity("ellipse", "椭圆 / 椭圆弧", new[]
             {
@@ -309,6 +311,29 @@ namespace AcadClr.Core
                 P("current", "bool", Verbs.All, "设为当前图层（只能设 true）", "current=true"),
             }, "acadclr add /layers --type layer --prop name=WALL --prop color=1 --prop lineWeight=0.5",
                "acadclr set \"/layer[@name=WALL]\" --prop locked=true"),
+
+            new TypeDef("block", "/blocks", "图块定义。add 用已有实体定义新块；remove 只能删除没有被参照的块", false, new[]
+            {
+                P("name", "string", Verbs.All, "块名（set 即重命名）", "name=TREE", true),
+                P("entities", "paths", Verbs.Add, "组成块的实体：路径、句柄或 $N，多个用 ; 分隔（复制进块定义）", "entities=8A;8B", true),
+                P("base", "point", Verbs.Add | Verbs.Get, "基点：插入时与插入点重合的位置，默认 0,0", "base=1000,0"),
+                P("replace", "bool", Verbs.Add, "true：删除源实体，并在基点处插入该块（源实体被块替换）", "replace=true"),
+                P("description", "string", Verbs.All, "说明"),
+                P("count", "number", Verbs.Get, "块内实体数"),
+                P("bboxFromBase", "points", Verbs.Get, "相对基点的范围 minX,minY;maxX,maxY：插入点 + 该范围 = 实际占位"),
+                P("size", "string", Verbs.Get, "宽 x 高"),
+                P("references", "number", Verbs.Get, "被插入的次数"),
+                P("attributes", "string", Verbs.Get, "属性定义的标记，; 分隔"),
+            }, "acadclr add /blocks --type block --prop name=TREE --prop entities=\"8A;8B\" --prop base=0,0",
+               "acadclr add /model --type insert --prop name=TREE --prop position=5000,0"),
+
+            new TypeDef("linetype", "/linetypes", "线型。add 从 acadiso.lin / acad.lin 加载；图层、实体用到时也会自动加载", false, new[]
+            {
+                P("name", "string", Verbs.Add | Verbs.Get, "线型名", "name=CENTER", true),
+                P("description", "string", Verbs.Get, "说明"),
+                P("patternLength", "number", Verbs.Get, "一个图案周期的长度（图形单位）；大比例图上看不出间隔时调 LTSCALE"),
+                P("current", "bool", Verbs.Get, "是否为当前线型"),
+            }, "acadclr add /linetypes --type linetype --prop name=DASHED", "acadclr query \"linetype[name~=CENTER]\""),
 
             new TypeDef("xref", "/xrefs", "外部参照（DWG）。附着 / 重载 / 卸载 / 绑定 / 拆离是数据库级操作，不参与 batch 回滚", false, new[]
             {
@@ -677,6 +702,7 @@ namespace AcadClr.Core
             sb.AppendLine("路径：/  /model  /model/line[1]  /model/entity[@handle=2A3]  /entity[@handle=2A3]");
             sb.AppendLine("      /layers  /layer[@name=WALL]  /xrefs  /xref[@name=BASE]  /devices  /device[@name=...]");
             sb.AppendLine("      /layouts  /layout[@name=A3]  /layout[@name=A3]/viewport[1]  （图纸空间实体的父路径是布局）");
+            sb.AppendLine("      /blocks  /block[@name=TREE]  /linetypes  /linetype[@name=CENTER]");
             sb.AppendLine("      （索引从 1 开始，[last()] 取最后一个）");
             sb.AppendLine();
             sb.AppendLine("类型：" + string.Join("  ", Types.Select(t => t.Name)));

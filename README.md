@@ -118,6 +118,10 @@ acadclr stats plan.dwg
 /layer[@name=WALL]         图层
 /xrefs                     外部参照表
 /xref[@name=BASE]          外部参照
+/blocks                    图块定义（bboxFromBase：相对基点的范围）
+/block[@name=TREE]         图块定义
+/linetypes                 线型表
+/linetype[@name=CENTER]    线型
 ```
 
 选择器：`line[layer=WALL][length>=3000]`、`entity[color=1]`、`text[text~=客厅]`、`layer[frozen=true]`。

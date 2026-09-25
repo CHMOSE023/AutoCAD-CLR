@@ -90,6 +90,16 @@ $n3 = Join-Path $out "测量校验.dwg"
 Step "测量校验 新建"      @("create", $n3)
 Step "测量校验"           @("batch", "--dwg", $n3, "--input", (Join-Path $PSScriptRoot "inspect.json"))
 
+# 图块与线型：定义块（含 replace）、插入、改名、属性（属性定义用 LISP entmake 造）、删除保护
+$n4 = Join-Path $out "图块.dwg"
+Step "图块 新建"          @("create", $n4)
+Step "图块 定义与插入"    @("batch", "--dwg", $n4, "--input", (Join-Path $PSScriptRoot "blocks.json"))
+Step "图块 属性定义"      @("lisp", $n4, "--file", (Join-Path $PSScriptRoot "attdef.lsp"), "--save")
+Step "图块 插入带属性"    @("add", $n4, "/model", "--type", "insert", "--prop", "name=ROOMTAG", "--prop", "position=3000,3000", "--prop", "attributes=NO=A-101;AREA=36.5")
+Step "图块 改属性"        @("set", $n4, "insert[name=ROOMTAG]", "--prop", "attributes=NO=A-102")
+Step "图块 删除被参照的块" @("remove", $n4, "/block[@name=树]")
+Step "图块 列表"          @("get", $n4, "/blocks")
+
 Step "第2批 新建"          @("create", $n2)
 Step "第2批 布局与视口"    @("batch", "--dwg", $n2, "--input", (Join-Path $PSScriptRoot "layouts.json"))
 Step "第2批 布局列表"      @("get", $n2, "/layouts")

@@ -62,6 +62,16 @@ acadclr batch --dwg plan.dwg --input plan.json   # 离线模式，自动写回�
 - `trim` `extend` `fillet` `chamfer` 是 AutoCAD 命令，只能单独调用。目标写成 `句柄@x,y`，拾取点落在要剪掉或要延伸的那一段上：
   `acadclr edit trim "8D@13500,2000" --prop edges=8B`
 
+## 图块与线型
+
+- `get /blocks` 列出块定义。**插入前先看 `bboxFromBase`**：它是相对基点的范围，插入点 + 该范围 = 实际占位（基点在底边的车位块很容易插反）。
+- 定义块：`add /blocks --type block --prop name=车位 --prop entities="$0;$1" --prop base=1250,0`；加 `replace=true` 把源实体原地换成块参照。
+- 插入：`add /model --type insert --prop name=车位 --prop position=10000,0 --prop layer=PARK`（记得指定图层）。
+  带属性的块用 `attributes=NO=A-101;AREA=36.5` 赋值，没给的取默认值；`set` 同一属性可修改。
+- 线型：`get /linetypes`；图层 / 实体用到的线型会自动加载，也可 `add /linetypes --type linetype --prop name=DASHED`。
+  点划线在大比例图上看不出间隔时，调 LTSCALE。
+- 被参照的块、被使用的线型不能 `remove`，错误信息会告诉你怎么找到使用者。
+
 ## 测量与校验（只读，可放进 batch）
 
 - `measure area|length <目标>`：面积 / 周长、长度，选择器命中多个时给出合计。`measure distance --prop from=x,y --prop to=x,y`；
