@@ -168,7 +168,11 @@ AcadClr.Plugin
       实测结论：插件的修改要用带命令名的 `LockDocument` 才会成为独立撤销步；任何文档锁都会留下撤销步，所以只读请求不加锁；
       UNDO N 必须在主线程作为独立命令发送。新增 `tests/live.ps1`（16 项，AutoCAD 2020 全部通过）
 - [ ] 操作日志：归入步骤 3 的 Safety（与来源、只读模式一起做）
-- [ ] 已有能力的差异对比
+- [x] 已有能力的差异对比：逐条核对 AutoCADMCP 注释里的实测结论（样条闭合只认节点矢量、打印的文档上下文 / 切布局时机 /
+      BACKGROUNDPLOT / 图纸单位先设 / Destroy 引擎 / window 范围不可用、视口超过 MAXACTVP、UpdateExt 要加锁等），CLR 均已覆盖；
+      唯一缺的 select 窗口过滤并入选择器：`[inside=x1,y1;x2,y2]`、`[crossing=x1,y1;x2,y2]`。
+      迁移对照表 `docs/migrate-from-autocad-mcp.md` 已完成（步骤 5 的一项提前做），85 个工具逐一对应，
+      `DocExamplesTests` 校验表中每条命令能通过解析与属性校验
 
 验收：85 个工具的每项能力都能用统一命令完成，CLI 可以调用，`help` 能查到，`tests/` 下有对应用例；
 对照表（步骤 5）每一行都有可运行的等价调用。
@@ -247,8 +251,8 @@ acadclr mcp --http [--port 7140]             # Streamable HTTP，常驻
 
 - [ ] `D:\AutoCADMCP\scripts\test-mcp.ps1` 移到 `tests/`，改为调用统一工具，拆成旧协议与新协议两套、stdio 与 HTTP 两种传输（脚本保持 ASCII）
 - [ ] `test/AcadMcp.ProtocolTest` 移到 `tests/`，补充 `server/discover`、版本协商、请求头校验、Origin 校验、token 用例
-- [ ] 新增 `docs/migrate-from-autocad-mcp.md`：85 个旧工具逐个给出等价调用（MCP JSON 与 CLI 各一行），例如
-      `draw_circle{center,radius}` → `add{parent:"/model",type:"circle",props:{center,radius}}` / `acadclr add /model --type circle --prop …`
+- [x] 新增 `docs/migrate-from-autocad-mcp.md`：85 个旧工具逐个给出等价写法（命令行；MCP 按“参数同名”规则换写，文首给出对照示例），
+      单元测试校验每条示例
 - [ ] SKILL.md 改为 CLI 与 MCP 共用：说明“参数同名”规则后只写一种例子
 - [ ] README 重写：统一命令、CLI、MCP（stdio 与 HTTP 两种 `.mcp.json` 示例）、离线模式
 - [ ] 版本号升到 0.2.0

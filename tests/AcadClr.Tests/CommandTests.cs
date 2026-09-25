@@ -287,6 +287,37 @@ namespace AcadClr.Tests
         }
     }
 
+    /// <summary>选择器的窗口条件（对应 AutoCADMCP 的 select window / crossing）。</summary>
+    public class SelectorWindowTests
+    {
+        private static bool Match(string selector, string bbox) =>
+            Selector.Parse(selector).Matches("line", a => a == "bbox" ? bbox : a == "layer" ? "WALL" : null);
+
+        [Theory]
+        [InlineData("line[inside=0,0;100,100]", "10,10;90,90", true)]
+        [InlineData("line[inside=100,100;0,0]", "10,10;90,90", true)]   // 角点顺序无关
+        [InlineData("line[inside=0,0;100,100]", "10,10;110,90", false)]
+        [InlineData("line[crossing=0,0;100,100]", "10,10;110,90", true)]
+        [InlineData("line[crossing=0,0;100,100]", "200,200;300,300", false)]
+        [InlineData("line[crossing=0,0;100,100]", "100,0;200,50", true)]   // 贴边算相交
+        [InlineData("line[inside=0,0;100,100][layer=WALL]", "10,10;90,90", true)]
+        [InlineData("line[inside=0,0;100,100][layer=AXIS]", "10,10;90,90", false)]
+        public void 按包围盒判断窗口(string selector, string bbox, bool expected) => Assert.Equal(expected, Match(selector, bbox));
+
+        [Fact]
+        public void 没有包围盒的元素不匹配() =>
+            Assert.False(Selector.Parse("entity[crossing=0,0;1,1]").Matches("text", a => null));
+
+        [Theory]
+        [InlineData("line[inside>0,0;1,1]", "只支持 =")]
+        [InlineData("line[inside=0,0]", "两个角点")]
+        public void 窗口写错时报错(string selector, string expected)
+        {
+            var err = Assert.IsType<CliError>(Record.Exception(() => Match(selector, "0,0;1,1")));
+            Assert.Contains(expected, err.Message);
+        }
+    }
+
     /// <summary>命令行特有的解析规则。</summary>
     public class CliParserTests
     {

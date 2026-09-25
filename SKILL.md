@@ -35,6 +35,7 @@ acadclr help polyline     # 某类型的全部属性、可用操作、示例
 - 坐标写成 `x,y`；多段线顶点写成 `x,y;x,y;…`。
 - 实体指定的图层不存在时会自动创建；要控制颜色和线宽，就先 `add /layers --type layer`，再画图。
 - 大多数属性保持 bylayer，只在图层上设颜色、线型、线宽。这才是规范的 CAD 做法。
+- 按窗口选：`entity[inside=x1,y1;x2,y2]`（包围盒完全在窗口内）、`entity[crossing=x1,y1;x2,y2]`（与窗口相交），可与其他条件组合。
 - `set` 或 `remove` 用选择器时必须带条件；`remove` 一次超过 30 个元素需要加 `--force`。先 `query` 看一眼匹配数量再动手。
 - batch 里用 `"$N"` 引用第 N 条操作（从 0 开始）生成的路径：
 

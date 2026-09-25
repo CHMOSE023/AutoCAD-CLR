@@ -747,6 +747,9 @@ namespace AcadClr.Core
             sb.AppendLine("      /documents  /document[@name=plan.dwg]  （打开的图形，仅实时模式；其他命令用 --doc 指定文档）");
             sb.AppendLine("      （索引从 1 开始，[last()] 取最后一个）");
             sb.AppendLine();
+            sb.AppendLine("选择器：line[layer=WALL][length>=3000]  text[text~=客厅]  insert[name=TREE]  entity[color=1]");
+            sb.AppendLine("      运算符 = != > < >= <= ~=（包含）；窗口：[inside=x1,y1;x2,y2] 完全在内，[crossing=x1,y1;x2,y2] 相交");
+            sb.AppendLine();
             sb.AppendLine("类型：" + string.Join("  ", Types.Select(t => t.Name)));
             sb.AppendLine("      其他实体（hatch、dimension、spline…）可查询，并可改公共属性。");
             sb.AppendLine();

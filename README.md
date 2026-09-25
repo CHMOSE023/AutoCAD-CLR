@@ -131,6 +131,7 @@ acadclr stats plan.dwg
 ```
 
 选择器：`line[layer=WALL][length>=3000]`、`entity[color=1]`、`text[text~=客厅]`、`layer[frozen=true]`。
+按窗口选：`entity[inside=0,0;6000,4000]`（包围盒完全在窗口内）、`entity[crossing=0,0;6000,4000]`（与窗口相交），可与其他条件组合。
 支持的运算符有 `= != > < >= <= ~=`（`~=` 为包含匹配，不区分大小写）；多个 `[]` 之间是“与”的关系。
 
 ## 批处理

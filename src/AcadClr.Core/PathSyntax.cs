@@ -180,8 +180,32 @@ namespace AcadClr.Core
         {
             if (!MatchesType(nodeType)) return false;
             foreach (var c in Conditions)
-                if (!Test(c, getProp(c.Attr))) return false;
+            {
+                bool ok = c.Attr == "inside" || c.Attr == "crossing" ? TestWindow(c, getProp("bbox")) : Test(c, getProp(c.Attr));
+                if (!ok) return false;
+            }
             return true;
+        }
+
+        /// <summary>
+        /// 窗口条件（对应 AutoCADMCP 的 select 工具的 window / crossing）：按包围盒判断，
+        /// [inside=x1,y1;x2,y2] 完全在窗口内，[crossing=x1,y1;x2,y2] 与窗口相交（含完全在内）。没有包围盒的元素不匹配。
+        /// </summary>
+        private static bool TestWindow(Condition c, string? bbox)
+        {
+            if (c.Op != "=") throw new CliError("invalid_selector", $"[{c.Attr}] 只支持 =，写成 [{c.Attr}=x1,y1;x2,y2]。");
+            if (c.Value.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries).Length != 2)
+                throw new CliError("invalid_selector", $"[{c.Attr}] 需要窗口的两个角点 x1,y1;x2,y2，收到 “{c.Value}”。");
+            var w = Values.Points(c.Attr, c.Value);
+            if (string.IsNullOrEmpty(bbox)) return false;
+            var b = Values.Points("bbox", bbox!);
+            if (b.Count != 2) return false;
+            double wx1 = Math.Min(w[0][0], w[1][0]), wx2 = Math.Max(w[0][0], w[1][0]);
+            double wy1 = Math.Min(w[0][1], w[1][1]), wy2 = Math.Max(w[0][1], w[1][1]);
+            double bx1 = b[0][0], by1 = b[0][1], bx2 = b[1][0], by2 = b[1][1];
+            return c.Attr == "inside"
+                ? bx1 >= wx1 && bx2 <= wx2 && by1 >= wy1 && by2 <= wy2
+                : bx1 <= wx2 && bx2 >= wx1 && by1 <= wy2 && by2 >= wy1;
         }
 
         private static bool Test(Condition c, string? actual)
