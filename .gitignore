@@ -6,3 +6,4 @@ obj/
 *.dwl
 *.dwl2
 test-out/
+*.log
