@@ -171,5 +171,22 @@ namespace AcadClr.Core
             if (d < 0) d += 360;
             return d;
         }
+
+        /// <summary>长度单位 → 1 单位等于多少米。</summary>
+        private static readonly Dictionary<string, double> UnitMeters = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["mm"] = 0.001, ["cm"] = 0.01, ["m"] = 1, ["km"] = 1000,
+            ["in"] = 0.0254, ["ft"] = 0.3048, ["yd"] = 0.9144, ["mi"] = 1609.344,
+        };
+
+        public static double MetersPerUnit(string prop, string unit)
+        {
+            if (UnitMeters.TryGetValue(unit.Trim(), out var m)) return m;
+            throw new CliError("invalid_value", $"{prop}：无法识别的长度单位 “{unit}”。", "可用：" + string.Join(" ", UnitMeters.Keys));
+        }
+
+        /// <summary>长度换算。</summary>
+        public static double ConvertLength(double value, string from, string to) =>
+            value * MetersPerUnit("from", from) / MetersPerUnit("to", to);
     }
 }

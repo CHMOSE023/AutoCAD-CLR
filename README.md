@@ -92,6 +92,8 @@ acadclr stats plan.dwg
 | `remove <path\|selector>` | 删除；一次超过 30 个需要加 `--force` |
 | `batch --input f.json \| --commands '<json>' \| 标准输入` | 批处理，默认原子执行 |
 | `stats` | 按类型、图层统计实体，并给出图形范围 |
+| `measure <动作> [目标]` | 测量：`distance` `area` `length` `convert`（单位换算） |
+| `check <动作> <目标>` | 空间校验（按包围盒）：`overlap` 重叠、`inside` 越界、`adjacent` 相邻，结果 `PASS` / `FAIL` |
 | `lisp "<expr>" \| --file f.lsp` | 执行 AutoLISP 并返回值；实时模式加 `--cmd` 走命令队列，离线模式加 `--save` 保存 |
 | `script f.scr \| --text "..."` | 执行脚本；离线模式可以对多个 DWG 批量运行，文件名支持通配符 |
 | `save [--as path]` | 保存（实时模式） |

@@ -85,6 +85,11 @@ Step "离线 LISP"       @("lisp", $b, "--file", $lsp)
 
 # ---- 第 2 批：布局 / 视口（文档模式）/ 打印 ----
 $n2 = Join-Path $out "第2批.dwg"
+# 测量与校验：已知几何（共边、1000x1000 重叠、越界、相邻），结果与 inspect.json 注释核对
+$n3 = Join-Path $out "测量校验.dwg"
+Step "测量校验 新建"      @("create", $n3)
+Step "测量校验"           @("batch", "--dwg", $n3, "--input", (Join-Path $PSScriptRoot "inspect.json"))
+
 Step "第2批 新建"          @("create", $n2)
 Step "第2批 布局与视口"    @("batch", "--dwg", $n2, "--input", (Join-Path $PSScriptRoot "layouts.json"))
 Step "第2批 布局列表"      @("get", $n2, "/layouts")

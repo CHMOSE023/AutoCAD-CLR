@@ -109,6 +109,18 @@ namespace AcadClr.Cli
                 case "edit":
                     return Edit(cmd, a, dwg, pid, liveTimeoutMs, offlineTimeout);
 
+                case "measure":
+                case "check":
+                {
+                    var action = Schema.RequireAction(cmd.Name, a.GetString("action"));
+                    string? path = a.GetString("path"), selector = a.GetString("selector");
+                    if (action.NeedsTarget) (path, selector) = Target(cmd, a);
+                    else if (path != null || selector != null)
+                        throw new CliError("usage", $"{cmd.Name} {action.Name} 不需要目标。", $"运行 acadclr help {cmd.Name} {action.Name}");
+                    action.CheckProps(new BatchItem { Props = (JObject?)a["props"] }.GetProps());
+                    return Run(new BatchItem { Command = cmd.Name, Action = action.Name, Path = path, Selector = selector, Props = (JObject?)a["props"] });
+                }
+
                 case "batch":
                 {
                     var items = a["items"] as JArray
@@ -211,10 +223,7 @@ namespace AcadClr.Cli
 
         private static Call Edit(CommandDef cmd, JObject a, string? dwg, int? pid, int? liveTimeoutMs, int offlineTimeout)
         {
-            var name = a.GetString("action")!;
-            var action = Schema.FindAction(name) ?? throw new CliError("usage", $"未知的 edit 动作 “{name}”。",
-                (Schema.Suggest(name, Schema.Actions.Select(x => x.Name)) is string n ? $"是否想用 {n}？" : "") +
-                "可用：" + string.Join("、", Schema.Actions.Select(x => x.Name)));
+            var action = Schema.RequireAction("edit", a.GetString("action"));
             var (path, selector) = Target(cmd, a);
             var props = (JObject?)a["props"];
 
@@ -241,10 +250,7 @@ namespace AcadClr.Cli
             }
 
             // 命令式动作（trim / extend / fillet / chamfer）：生成 (vl-cmdf ...)，实时走命令队列，离线由 accoreconsole 打开图纸执行并保存
-            var p = new Dictionary<string, string>();
-            foreach (var kv in new BatchItem { Props = props }.GetProps()) p[action.CheckProp(kv.Key).Name] = kv.Value;
-            var miss = action.Props.Where(x => x.Required && !p.ContainsKey(x.Name)).Select(x => x.Name).ToList();
-            if (miss.Count > 0) throw new CliError("missing_property", $"edit {action.Name} 缺少属性：{string.Join("、", miss)}。", $"运行 acadclr help edit {action.Name}");
+            var p = action.CheckProps(new BatchItem { Props = props }.GetProps());
 
             var code = CommandEdits.Build(action, path ?? selector!, p);
             if (dwg != null)
@@ -284,12 +290,10 @@ namespace AcadClr.Cli
             var first = words[0];
 
             if (first.Equals("plot", StringComparison.OrdinalIgnoreCase)) return new JObject { ["text"] = Schema.HelpPlot() };
-            if (first.Equals("edit", StringComparison.OrdinalIgnoreCase))
+            if (Schema.ActionVerbs.FirstOrDefault(v => v.Equals(first, StringComparison.OrdinalIgnoreCase)) is string verb)
             {
-                if (words.Length == 1) return new JObject { ["text"] = Schema.HelpEdit() };
-                var act = Schema.FindAction(words[1]) ?? throw new CliError("usage", $"没有 edit 动作 “{words[1]}”。",
-                    "可用：" + string.Join("、", Schema.Actions.Select(x => x.Name)));
-                return new JObject { ["text"] = Schema.HelpAction(act) };
+                if (words.Length == 1) return new JObject { ["text"] = Schema.HelpVerb(verb) };
+                return new JObject { ["text"] = Schema.HelpAction(Schema.RequireAction(verb, words[1])) };
             }
             if (Schema.FindAction(first) is ActionDef direct) return new JObject { ["text"] = Schema.HelpAction(direct) };
             if (Schema.FindType(first) is TypeDef t) return new JObject { ["text"] = Schema.HelpType(t), ["schema"] = Schema.HelpJson(t) };

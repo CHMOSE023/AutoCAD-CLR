@@ -280,10 +280,12 @@ namespace AcadClr.Plugin.Engine
                 case "remove": DoRemove(item, r, prior); break;
                 case "stats": DoStats(r); break;
                 case "edit": DoEdit(item, r, prior); break;
+                case "measure": DoMeasure(item, r, prior); break;
+                case "check": DoCheck(item, r, prior); break;
                 case "":
-                    throw new CliError("invalid_request", "缺少 command（或 op）字段。", "可用：get query add set remove edit stats");
+                    throw new CliError("invalid_request", "缺少 command（或 op）字段。", "可用：" + BatchVerbs);
                 default:
-                    throw new CliError("invalid_request", $"未知操作 “{item.Verb}”。", "可用：get query add set remove edit stats");
+                    throw new CliError("invalid_request", $"未知操作 “{item.Verb}”。", "可用：" + BatchVerbs);
             }
         }
 
@@ -501,19 +503,12 @@ namespace AcadClr.Plugin.Engine
 
         private void DoEdit(BatchItem item, ItemResult r, List<ItemResult> prior)
         {
-            var name = (item.Action ?? "").Trim().ToLowerInvariant();
-            var action = Schema.FindAction(name) ?? throw new CliError("invalid_request",
-                name.Length == 0 ? "edit 缺少 action。" : $"未知的 edit 动作 “{name}”。",
-                "可用：" + string.Join("、", Schema.Actions.Select(a => a.Name)));
+            var action = Schema.RequireAction("edit", item.Action);
+            var name = action.Name;
             if (action.UsesCommand)
                 throw new CliError("invalid_request", $"edit {name} 通过 AutoCAD 命令执行，不能放进 batch。",
                     $"单独运行：acadclr edit {name} ...");
-
-            var props = new Dictionary<string, string>();
-            foreach (var kv in item.GetProps()) props[action.CheckProp(kv.Key).Name] = kv.Value;
-            var missing = action.Props.Where(p => p.Required && !props.ContainsKey(p.Name)).Select(p => p.Name).ToList();
-            if (missing.Count > 0)
-                throw new CliError("missing_property", $"edit {name} 缺少属性：{string.Join("、", missing)}。", $"运行 acadclr help edit {name}");
+            var props = action.CheckProps(item.GetProps());
 
             var text = item.Path ?? item.Selector ?? throw new CliError("invalid_request", $"edit {name} 缺少目标。");
             var targets = TargetEntities(text, prior, item.Force == true, r);
@@ -524,6 +519,64 @@ namespace AcadClr.Plugin.Engine
             if (results.Count > DefaultListLimit) r.Truncated = true;
             r.Path = r.Nodes.FirstOrDefault()?.Path;
             r.Matched = results.Count;
+        }
+
+        // ------------------------------------------------------------------ measure / check
+
+        private const string BatchVerbs = "get query add set remove edit measure check stats";
+
+        private void DoMeasure(BatchItem item, ItemResult r, List<ItemResult> prior)
+        {
+            var action = Schema.RequireAction("measure", item.Action);
+            var props = action.CheckProps(item.GetProps());
+            switch (action.Name)
+            {
+                case "distance": Report(r, Inspect.Distance(props)); break;
+                case "convert": Report(r, Inspect.Convert(_db, props)); break;
+                case "area": Report(r, Inspect.Area(_tr, Entities(item, action, prior, r))); break;
+                default: Report(r, Inspect.Length(_tr, Entities(item, action, prior, r))); break;
+            }
+        }
+
+        private void DoCheck(BatchItem item, ItemResult r, List<ItemResult> prior)
+        {
+            var action = Schema.RequireAction("check", item.Action);
+            var props = action.CheckProps(item.GetProps());
+            var ents = Entities(item, action, prior, r);
+            switch (action.Name)
+            {
+                case "overlap":
+                    Report(r, Inspect.Overlap(_tr, ents, props));
+                    break;
+                case "inside":
+                    Report(r, Inspect.Inside(_tr, ents, Open(EntityRef(props["boundary"], prior))));
+                    break;
+                default:
+                    if (ents.Count != 1) throw new CliError("invalid_request", $"check adjacent 的目标应为一个实体，匹配到 {ents.Count} 个。", "另一个用 --prop with=...");
+                    Report(r, Inspect.Adjacent(_tr, ents[0], Open(EntityRef(props["with"], prior)), props));
+                    break;
+            }
+        }
+
+        /// <summary>measure / check 的目标实体；选择器不需要 --force（只读）。</summary>
+        private List<Entity> Entities(BatchItem item, ActionDef action, List<ItemResult> prior, ItemResult r)
+        {
+            var text = item.Path ?? item.Selector ?? throw new CliError("invalid_request", $"{action.Verb} {action.Name} 缺少目标。", "目标：" + action.Target);
+            var ids = TargetEntities(text, prior, true, r);
+            if (ids.Count == 0) throw new CliError("not_found", $"目标 “{text}” 没有匹配任何实体。");
+            return ids.Select(Open).ToList();
+        }
+
+        private Entity Open(ObjectId id) => (Entity)_tr.GetObject(id, OpenMode.ForRead);
+
+        private static void Report(ItemResult r, Inspect.Result res)
+        {
+            r.Node = res.Summary;
+            if (res.Details.Count > 0)
+            {
+                r.Nodes = res.Details.Take(DefaultListLimit).ToList();
+                if (res.Details.Count > DefaultListLimit) r.Truncated = true;
+            }
         }
 
         /// <summary>

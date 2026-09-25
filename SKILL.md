@@ -62,6 +62,16 @@ acadclr batch --dwg plan.dwg --input plan.json   # 离线模式，自动写回�
 - `trim` `extend` `fillet` `chamfer` 是 AutoCAD 命令，只能单独调用。目标写成 `句柄@x,y`，拾取点落在要剪掉或要延伸的那一段上：
   `acadclr edit trim "8D@13500,2000" --prop edges=8B`
 
+## 测量与校验（只读，可放进 batch）
+
+- `measure area|length <目标>`：面积 / 周长、长度，选择器命中多个时给出合计。`measure distance --prop from=x,y --prop to=x,y`；
+  `measure convert --prop value=3.6 --prop from=m --prop to=mm`（from 缺省为图形单位）。
+- **面积对不代表位置对**。画完房间、车位这类布局后用 `check` 核对，结果看 `result=PASS/FAIL`：
+  - `check overlap "polyline[layer=ROOM]"`：两两重叠（共边不算）
+  - `check inside "polyline[layer=ROOM]" --prop boundary=<外轮廓句柄>`：是否越界，`outBy` 给出各方向超出的距离
+  - `check adjacent <A> --prop with=<B> --prop gap=240`：是否相邻（gap 为允许的墙厚 / 走廊宽度）
+- 判定按包围盒，矩形房间很准；斜放或异形实体可能误报，FAIL 时 `get` 实体复核。
+
 ## 布局、视口与打印
 
 - 实体画在哪个空间，由父路径决定：`/model` 或 `/layout[@name=A3]`。不存在"当前空间"这个概念，切换当前布局也不影响 add 的去向。

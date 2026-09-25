@@ -34,9 +34,14 @@ namespace AcadClr.Core
 
     public sealed class ActionDef
     {
+        /// <summary>所属动词：edit、measure、check。</summary>
+        public string Verb { get; set; } = "edit";
         public string Name { get; }
         public string Description { get; }
         public string Target { get; }
+
+        /// <summary>false：不需要目标实体（measure distance / convert）。</summary>
+        public bool NeedsTarget { get; set; } = true;
 
         /// <summary>true：通过 AutoCAD 交互命令实现，不能在事务 / batch 中执行。</summary>
         public bool UsesCommand { get; }
@@ -54,8 +59,19 @@ namespace AcadClr.Core
             var def = Props.FirstOrDefault(p => string.Equals(p.Name, prop, StringComparison.OrdinalIgnoreCase));
             if (def != null) return def;
             var near = Schema.Suggest(prop, Props.Select(p => p.Name));
-            throw new CliError("unsupported_property", $"edit {Name} 没有属性 “{prop}”。",
-                (near != null ? $"是否想用 {near}？" : "") + $"运行 acadclr help edit {Name} 查看。");
+            throw new CliError("unsupported_property", $"{Verb} {Name} 没有属性 “{prop}”。",
+                (near != null ? $"是否想用 {near}？" : "") + $"运行 acadclr help {Verb} {Name} 查看。");
+        }
+
+        /// <summary>校验属性名并检查必填项，返回规范名 → 值。</summary>
+        public Dictionary<string, string> CheckProps(IEnumerable<KeyValuePair<string, string>> props)
+        {
+            var map = new Dictionary<string, string>();
+            foreach (var kv in props) map[CheckProp(kv.Key).Name] = kv.Value;
+            var missing = Props.Where(p => p.Required && !map.ContainsKey(p.Name)).Select(p => p.Name).ToList();
+            if (missing.Count > 0)
+                throw new CliError("missing_property", $"{Verb} {Name} 缺少属性：{string.Join("、", missing)}。", $"运行 acadclr help {Verb} {Name}");
+            return map;
         }
     }
 
@@ -397,29 +413,110 @@ namespace AcadClr.Core
             }, "acadclr edit chamfer 8D --prop with=95 --prop d1=200"),
         };
 
-        public static ActionDef? FindAction(string name) =>
-            Actions.FirstOrDefault(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase));
+        // ---------------- measure / check 动作 ----------------
 
-        public static string HelpEdit()
+        private static ActionDef Measure(string name, string desc, string target, bool needsTarget, PropDef[] props, params string[] examples) =>
+            new ActionDef(name, desc, target, false, props, examples) { Verb = "measure", NeedsTarget = needsTarget };
+
+        private static ActionDef Check(string name, string desc, string target, PropDef[] props, params string[] examples) =>
+            new ActionDef(name, desc, target, false, props, examples) { Verb = "check" };
+
+        public static readonly List<ActionDef> MeasureActions = new List<ActionDef>
         {
+            Measure("distance", "两点间的距离、dx、dy 与方向角（度，逆时针为正）", "无", false, new[]
+            {
+                P("from", "point", Verbs.Set, "起点", "from=0,0", true),
+                P("to", "point", Verbs.Set, "终点", "to=3000,4000", true),
+            }, "acadclr measure distance --prop from=0,0 --prop to=3000,4000"),
+
+            Measure("area", "闭合实体（多段线、圆、椭圆、面域、填充…）的面积与周长，多个实体给出合计", TargetsNote, true, new PropDef[0],
+                "acadclr measure area \"polyline[layer=ROOM][closed=true]\""),
+
+            Measure("length", "曲线（直线、多段线、圆弧、样条…）的长度，多个实体给出合计", TargetsNote, true, new PropDef[0],
+                "acadclr measure length \"line[layer=WALL]\""),
+
+            Measure("convert", "长度单位换算：from 缺省为图形单位（INSUNITS）", "无", false, new[]
+            {
+                P("value", "number", Verbs.Set, "要换算的长度", "value=3.6", true),
+                P("to", "units", Verbs.Set, "目标单位：mm cm m km in ft yd mi", "to=mm", true),
+                P("from", "units", Verbs.Set, "源单位，缺省为图形单位", "from=m"),
+            }, "acadclr measure convert --prop value=3.6 --prop from=m --prop to=mm"),
+        };
+
+        public static readonly List<ActionDef> CheckActions = new List<ActionDef>
+        {
+            Check("overlap", "一组实体两两之间是否重叠（按包围盒，共边不算）", TargetsNote + "，至少两个", new[]
+            {
+                P("minArea", "number", Verbs.Set, "小于该面积的重叠忽略，默认 0"),
+            }, "acadclr check overlap \"polyline[layer=ROOM]\""),
+
+            Check("inside", "一组实体是否都落在边界实体内（按包围盒）", TargetsNote, new[]
+            {
+                P("boundary", "path", Verbs.Set, "边界实体：路径或句柄", "boundary=8A", true),
+            }, "acadclr check inside \"polyline[layer=ROOM]\" --prop boundary=8A"),
+
+            Check("adjacent", "两个实体是否相邻：一个方向有搭接，另一个方向的间距不超过 gap（按包围盒）", "一个实体", new[]
+            {
+                P("with", "path", Verbs.Set, "另一个实体：路径或句柄", "with=8B", true),
+                P("gap", "number", Verbs.Set, "允许的间距（墙厚、走廊宽度），默认 0", "gap=240"),
+            }, "acadclr check adjacent 8A --prop with=8B --prop gap=240"),
+        };
+
+        /// <summary>带动作的动词。</summary>
+        public static readonly string[] ActionVerbs = { "edit", "measure", "check" };
+
+        public static List<ActionDef> ActionsOf(string verb) =>
+            verb == "measure" ? MeasureActions : verb == "check" ? CheckActions : Actions;
+
+        public static ActionDef? FindAction(string name) => FindAction("edit", name);
+
+        public static ActionDef? FindAction(string verb, string name) =>
+            ActionsOf(verb).FirstOrDefault(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>查找动作，找不到时给出最接近的候选。</summary>
+        public static ActionDef RequireAction(string verb, string? name)
+        {
+            var list = ActionsOf(verb);
+            if (string.IsNullOrWhiteSpace(name))
+                throw new CliError("invalid_request", $"{verb} 缺少 action。", "可用：" + string.Join("、", list.Select(a => a.Name)));
+            return FindAction(verb, name!.Trim()) ?? throw new CliError("invalid_request", $"未知的 {verb} 动作 “{name}”。",
+                (Suggest(name, list.Select(a => a.Name)) is string n ? $"是否想用 {n}？" : "") + "可用：" + string.Join("、", list.Select(a => a.Name)));
+        }
+
+        private static readonly Dictionary<string, string> VerbSummary = new Dictionary<string, string>
+        {
+            ["edit"] = "对已有实体做几何编辑，返回生成或修改后的实体",
+            ["measure"] = "测量：距离、面积、长度、单位换算（只读）",
+            ["check"] = "空间校验：重叠、越界、相邻（只读，按包围盒判定）",
+        };
+
+        public static string HelpEdit() => HelpVerb("edit");
+
+        public static string HelpVerb(string verb)
+        {
+            var list = ActionsOf(verb);
             var sb = new StringBuilder();
-            sb.AppendLine("edit —— 对已有实体做几何编辑，返回生成或修改后的实体");
+            sb.AppendLine($"{verb} —— {VerbSummary[verb]}");
             sb.AppendLine();
-            sb.AppendLine("用法：acadclr edit <动作> <目标> [--prop key=value ...]");
-            sb.AppendLine("batch：{\"command\":\"edit\",\"action\":\"offset\",\"path\":\"$0\",\"props\":{\"distance\":240}}");
+            sb.AppendLine($"用法：acadclr {verb} <动作> <目标> [--prop key=value ...]");
+            var sample = list[0];
+            sb.AppendLine($"batch：{{\"command\":\"{verb}\",\"action\":\"{sample.Name}\"" + (sample.NeedsTarget ? ",\"path\":\"$0\"" : "") + ",\"props\":{...}}");
             sb.AppendLine();
-            foreach (var a in Actions)
+            foreach (var a in list)
                 sb.AppendLine("  " + a.Name.PadRight(9) + (a.UsesCommand ? "[命令] " : "       ") + a.Description);
             sb.AppendLine();
-            sb.AppendLine("[命令] 表示通过 AutoCAD 命令执行：不能放进 batch；实时模式走命令队列，离线模式由 accoreconsole 打开图纸执行并保存。");
-            sb.AppendLine("详细：acadclr help edit <动作>，例如 acadclr help edit array");
+            if (list.Any(a => a.UsesCommand))
+                sb.AppendLine("[命令] 表示通过 AutoCAD 命令执行：不能放进 batch；实时模式走命令队列，离线模式由 accoreconsole 打开图纸执行并保存。");
+            if (verb == "check")
+                sb.AppendLine("结果 result=PASS / FAIL。包围盒是轴对齐矩形：矩形房间足够准，斜放或异形实体可能误报，需要时 get 实体复核。");
+            sb.AppendLine($"详细：acadclr help {verb} <动作>，例如 acadclr help {verb} {list[Math.Min(1, list.Count - 1)].Name}");
             return sb.ToString();
         }
 
         public static string HelpAction(ActionDef a)
         {
             var sb = new StringBuilder();
-            sb.AppendLine($"edit {a.Name} —— {a.Description}");
+            sb.AppendLine($"{a.Verb} {a.Name} —— {a.Description}");
             sb.AppendLine("目标：" + a.Target);
             if (a.UsesCommand) sb.AppendLine("方式：AutoCAD 命令（不能放进 batch）");
             if (a.Props.Count > 0)

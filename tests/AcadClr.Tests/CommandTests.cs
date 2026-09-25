@@ -43,7 +43,7 @@ namespace AcadClr.Tests
         public void 可进batch的命令插件都认识()
         {
             // 与 Executor.Execute 的 switch 保持一致
-            var engineVerbs = new[] { "get", "query", "add", "set", "remove", "stats", "edit" };
+            var engineVerbs = new[] { "get", "query", "add", "set", "remove", "stats", "edit", "measure", "check" };
             foreach (var c in Commands.All.Where(c => c.Batchable)) Assert.Contains(c.Name, engineVerbs);
         }
     }
@@ -68,6 +68,9 @@ namespace AcadClr.Tests
             new object[] { new[] { "edit", "mirror", "polyline[layer=WALL]", "--prop", "axis=0,0;0,1" }, "{\"action\":\"mirror\",\"selector\":\"polyline[layer=WALL]\",\"props\":{\"axis\":\"0,0;0,1\"}}" },
             new object[] { new[] { "edit", "a.dwg", "trim", "8D@13500,2000", "--prop", "edges=8B" },
                 "{\"dwg\":\"a.dwg\",\"action\":\"trim\",\"selector\":\"8D@13500,2000\",\"props\":{\"edges\":\"8B\"}}" },
+            new object[] { new[] { "measure", "area", "polyline[layer=ROOM]" }, "{\"action\":\"area\",\"selector\":\"polyline[layer=ROOM]\"}" },
+            new object[] { new[] { "measure", "distance", "--prop", "from=0,0", "--prop", "to=3,4" }, "{\"action\":\"distance\",\"props\":{\"from\":\"0,0\",\"to\":\"3,4\"}}" },
+            new object[] { new[] { "check", "a.dwg", "adjacent", "8A", "--prop", "with=8B" }, "{\"dwg\":\"a.dwg\",\"action\":\"adjacent\",\"path\":\"8A\",\"props\":{\"with\":\"8B\"}}" },
             new object[] { new[] { "batch", "--commands", "[{\"command\":\"stats\"}]", "--best-effort", "--force" },
                 "{\"items\":[{\"command\":\"stats\"}],\"bestEffort\":true,\"force\":true}" },
             new object[] { new[] { "plot", "/layout[@name=A3]", "--prop", "output=D:/o.pdf" }, "{\"layout\":\"/layout[@name=A3]\",\"props\":{\"output\":\"D:/o.pdf\"}}" },
@@ -219,6 +222,11 @@ namespace AcadClr.Tests
         [InlineData("plot", "{\"props\":{\"ouput\":\"x\"}}", "是否想用 output")]
         [InlineData("lisp", "{\"code\":\"(+ 1 2)\",\"save\":true}", "只用于离线模式")]
         [InlineData("lisp", "{\"code\":\"(+ 1 2)\",\"commandQueue\":true,\"dwg\":\"a.dwg\"}", "只用于实时模式")]
+        [InlineData("measure", "{\"action\":\"distance\",\"path\":\"8A\",\"props\":{\"from\":\"0,0\",\"to\":\"1,1\"}}", "不需要目标")]
+        [InlineData("measure", "{\"action\":\"distance\",\"props\":{\"from\":\"0,0\"}}", "缺少属性：to")]
+        [InlineData("measure", "{\"action\":\"aera\",\"path\":\"8A\"}", "是否想用 area")]
+        [InlineData("check", "{\"action\":\"overlap\"}", "缺少目标")]
+        [InlineData("check", "{\"action\":\"inside\",\"path\":\"8A\"}", "缺少属性：boundary")]
         [InlineData("batch", "{}", "需要 items")]
         [InlineData("config", "{}", "只能在命令行使用")]
         [InlineData("sttus", "{}", "是否想用 status")]

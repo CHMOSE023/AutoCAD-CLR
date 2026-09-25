@@ -1,0 +1,20 @@
+[
+  {"command":"add","parent":"/model","type":"polyline","props":{"points":"0,0;20000,0;20000,12000;0,12000","closed":true,"layer":"OUTLINE"}},
+  {"command":"add","parent":"/model","type":"polyline","props":{"points":"0,0;6000,0;6000,4000;0,4000","closed":true,"layer":"ROOM"}},
+  {"command":"add","parent":"/model","type":"polyline","props":{"points":"6000,0;12000,0;12000,4000;6000,4000","closed":true,"layer":"ROOM"}},
+  {"command":"add","parent":"/model","type":"polyline","props":{"points":"11000,3000;15000,3000;15000,6000;11000,6000","closed":true,"layer":"ROOM"}},
+  {"command":"add","parent":"/model","type":"polyline","props":{"points":"18000,10000;22000,10000;22000,13000;18000,13000","closed":true,"layer":"ROOM"}},
+  {"command":"add","parent":"/model","type":"circle","props":{"center":"3000,8000","radius":1000,"layer":"ROOM"}},
+  {"command":"add","parent":"/model","type":"line","props":{"start":"0,-1000","end":"20000,-1000","layer":"AXIS"}},
+  {"command":"measure","action":"area","path":"$1"},
+  {"command":"measure","action":"area","selector":"entity[layer=ROOM]"},
+  {"command":"measure","action":"length","selector":"line[layer=AXIS]"},
+  {"command":"measure","action":"distance","props":{"from":"0,0","to":"3000,4000"}},
+  {"command":"measure","action":"convert","props":{"value":3.6,"from":"m","to":"mm"}},
+  {"command":"measure","action":"convert","props":{"value":2400,"to":"m"}},
+  {"command":"check","action":"overlap","selector":"polyline[layer=ROOM]"},
+  {"command":"check","action":"inside","selector":"entity[layer=ROOM]","props":{"boundary":"$0"}},
+  {"command":"check","action":"adjacent","path":"$1","props":{"with":"$2"}},
+  {"command":"check","action":"adjacent","path":"$1","props":{"with":"$3","gap":240}},
+  {"command":"check","action":"adjacent","path":"$1","props":{"with":"$5"}}
+]

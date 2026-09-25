@@ -138,6 +138,13 @@ namespace AcadClr.Cli
                                       (r.Truncated == true ? $"（只显示前 {r.Nodes?.Count} 个）" : ""));
                     foreach (var n in r.Nodes ?? Enumerable.Empty<Node>()) Console.WriteLine(prefix + "  " + Line(n));
                     break;
+                case "measure":
+                case "check":
+                    // 汇总一行，明细每行一个实体 / 一处问题
+                    Console.WriteLine(prefix + r.Node!.Type + ": " + string.Join("  ", r.Node.Props.Select(kv => kv.Key + "=" + Quote(kv.Value))));
+                    foreach (var n in r.Nodes ?? Enumerable.Empty<Node>()) Console.WriteLine(prefix + "  " + Line(n));
+                    if (r.Truncated == true) Console.WriteLine($"{prefix}  （只显示前 {r.Nodes?.Count} 条）");
+                    break;
                 case "query":
                     foreach (var n in r.Nodes ?? Enumerable.Empty<Node>()) Console.WriteLine(prefix + Line(n));
                     Console.WriteLine($"{prefix}共 {r.Matched} 个匹配" + (r.Truncated == true ? $"（只显示前 {r.Nodes?.Count} 个，--limit 调整）" : ""));
@@ -161,13 +168,11 @@ namespace AcadClr.Cli
         {
             var sb = new StringBuilder();
             sb.Append(n.Path).Append(" (").Append(n.Type).Append(')');
-            foreach (var kv in n.Props)
-            {
-                var v = kv.Value;
-                if (v.Length == 0 || v.IndexOfAny(new[] { ' ', '"', '\t' }) >= 0) v = "\"" + v.Replace("\"", "\\\"") + "\"";
-                sb.Append(' ').Append(kv.Key).Append('=').Append(v);
-            }
+            foreach (var kv in n.Props) sb.Append(' ').Append(kv.Key).Append('=').Append(Quote(kv.Value));
             return sb.ToString();
         }
+
+        private static string Quote(string v) =>
+            v.Length == 0 || v.IndexOfAny(new[] { ' ', '"', '\t' }) >= 0 ? "\"" + v.Replace("\"", "\\\"") + "\"" : v;
     }
 }

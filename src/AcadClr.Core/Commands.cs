@@ -160,6 +160,18 @@ namespace AcadClr.Core
                 Props("动作参数（help edit <动作> 查看）"),
                 Force("选择器命中过多时也执行")) { Batchable = true },
 
+            new CommandDef("measure", "measure <动作> [目标]", "测量：距离 面积 长度 单位换算", CommandModes.Both, false,
+                A("action", ArgKind.String, "动作：distance area length convert", pos: 0, required: true),
+                Target("目标：路径、句柄，多个用 ; 分隔（distance、convert 不需要）", 1, RouteEditTarget),
+                SelectorArg("目标选择器"),
+                Props("动作参数（help measure <动作> 查看）")) { Batchable = true },
+
+            new CommandDef("check", "check <动作> <目标>", "空间校验：重叠 越界 相邻（按包围盒）", CommandModes.Both, false,
+                A("action", ArgKind.String, "动作：overlap inside adjacent", pos: 0, required: true),
+                Target("目标：路径、句柄，多个用 ; 分隔", 1, RouteEditTarget),
+                SelectorArg("目标选择器"),
+                Props("动作参数（help check <动作> 查看）")) { Batchable = true },
+
             new CommandDef("plot", "plot [布局]", "打印到 PDF（acadclr help plot）", CommandModes.Both, false,
                 A("layout", ArgKind.String, "布局名或路径 /layout[@name=A3]；不填时实时模式打印当前布局，离线模式打印 Model", pos: 0),
                 Props("打印参数（help plot 查看）")),

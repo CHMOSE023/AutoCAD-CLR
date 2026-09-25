@@ -147,6 +147,17 @@ AcadClr.Plugin
 
 建议顺序：命令表与统一入口 → 修改（缺）→ 测量校验 → 视图 → 块与线型 → 系统 → 文档 → 撤销与日志 → 已有能力的差异对比。
 
+进度：
+- [x] 修改（缺）：copy = `add --from … --prop move=`（多份用 `edit array`）；trim / extend / fillet / chamfer 已有，无需移植
+- [x] 测量校验：`measure distance|area|length|convert`、`check overlap|inside|adjacent`（Engine/Inspect.cs，只读、可进 batch）；
+      `measure area|length` 对多个实体给出合计，是 MCP 版没有的；check 判定逻辑与 MCP 版相同（包围盒、容差 1）
+- [ ] 视图
+- [ ] 块与线型
+- [ ] 系统
+- [ ] 文档
+- [ ] 撤销与日志
+- [ ] 已有能力的差异对比
+
 验收：85 个工具的每项能力都能用统一命令完成，CLI 可以调用，`help` 能查到，`tests/` 下有对应用例；
 对照表（步骤 5）每一行都有可运行的等价调用。
 
