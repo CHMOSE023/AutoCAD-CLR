@@ -357,9 +357,16 @@ namespace AcadClr.Core
                "acadclr set \"xref[status=filenotfound]\" --prop path=D:\\new\\base.dwg",
                "acadclr remove \"/xref[@name=base]\"    # 拆离"),
 
-            new TypeDef("document", "", "文档本身，路径 /", false, new[]
+            new TypeDef("document", "/documents", "文档。/ 是当前文档（或 --doc 指定的文档）；/documents 列出 AutoCAD 里打开的全部图形（仅实时模式）", false, new[]
             {
-                P("file", "string", Verbs.Get, "文件路径"),
+                P("file", "string", Verbs.Get, "文件路径（未保存过的新图为空）"),
+                P("name", "string", Verbs.Get, "文件名：/document[@name=...] 与 --doc 用它定位"),
+                P("active", "bool", Verbs.Get, "是否为当前文档"),
+                P("readOnly", "bool", Verbs.Add | Verbs.Get, "只读打开"),
+                P("modified", "bool", Verbs.Get, "是否有未保存的修改"),
+                P("current", "bool", Verbs.Set, "set \"/document[@name=...]\" --prop current=true 切换当前文档"),
+                P("path", "string", Verbs.Add, "add /documents 时：打开该 DWG（已打开则切换过去）", "path=D:\\work\\plan.dwg"),
+                P("template", "string", Verbs.Add, "add /documents 时：用该样板新建，默认 acadiso.dwt", "template=acadiso.dwt"),
                 P("version", "string", Verbs.Get, "DWG 版本"),
                 P("units", "units", Verbs.Get | Verbs.Set, "图形单位 INSUNITS：mm cm m in ft unitless。只影响插入图块 / 外部参照时的缩放和 measure convert 的缺省单位，不缩放已有几何", "units=mm"),
                 P("measurement", "string", Verbs.Get | Verbs.Set, "MEASUREMENT：metric（公制）或 imperial（英制），决定填充图案与线型文件的缺省选择", "measurement=metric"),
@@ -373,7 +380,9 @@ namespace AcadClr.Core
                 P("currentLayout", "string", Verbs.Get, "当前布局（切换用 set \"/layout[@name=...]\" --prop current=true）"),
                 P("layers", "number", Verbs.Get, "图层数"),
                 P("entities", "number", Verbs.Get, "模型空间实体数"),
-            }, "acadclr get /", "acadclr set / --prop units=mm --prop ltscale=100"),
+            }, "acadclr get /", "acadclr set / --prop units=mm --prop ltscale=100",
+               "acadclr get /documents", "acadclr add /documents --type document --prop path=D:\\work\\plan.dwg",
+               "acadclr set \"/document[@name=plan.dwg]\" --prop current=true", "acadclr remove \"/document[@name=plan.dwg]\" --force   # 丢弃修改并关闭"),
 
             new TypeDef("sysvar", "/sysvars", "系统变量（GETVAR / SETVAR）。get /sysvars 列出常用变量，任意变量用 /sysvar[@name=X]", false, new[]
             {
@@ -502,11 +511,27 @@ namespace AcadClr.Core
             }, "acadclr check adjacent 8A --prop with=8B --prop gap=240"),
         };
 
+        public static readonly List<ActionDef> ViewActions = new List<ActionDef>
+        {
+            new ActionDef("zoom", "调整当前视图：缩放到图形范围、窗口，或给定目标实体的范围（四周留 5% 边距）", "可选：路径、句柄或选择器", false, new[]
+            {
+                P("to", "string", Verbs.Set, "extents（默认）或窗口角点 x1,y1;x2,y2；给了目标实体时忽略", "to=0,0;20000,12000"),
+            }, "acadclr view zoom", "acadclr view zoom \"polyline[layer=ROOM]\"") { Verb = "view", NeedsTarget = false },
+
+            new ActionDef("capture", "截取 AutoCAD 窗口为 PNG，用来目视核对绘图结果。MCP 返回图片，命令行保存为文件", "可选：先缩放到这些实体", false, new[]
+            {
+                P("region", "string", Verbs.Set, "drawing（只截绘图区，默认，更省 token）或 window（整个窗口）", "region=window"),
+                P("zoom", "string", Verbs.Set, "截图前先缩放：extents 或窗口 x1,y1;x2,y2", "zoom=extents"),
+                P("maxWidth", "number", Verbs.Set, "输出图片最大宽度（像素），超过时等比缩小；建议 1200 左右", "maxWidth=1200"),
+                P("output", "string", Verbs.Set, "保存为该 PNG 文件（绝对路径）；命令行缺省存到临时目录", "output=D:\\out\\view.png"),
+            }, "acadclr view capture --prop zoom=extents --prop maxWidth=1200") { Verb = "view", NeedsTarget = false },
+        };
+
         /// <summary>带动作的动词。</summary>
-        public static readonly string[] ActionVerbs = { "edit", "measure", "check" };
+        public static readonly string[] ActionVerbs = { "edit", "measure", "check", "view" };
 
         public static List<ActionDef> ActionsOf(string verb) =>
-            verb == "measure" ? MeasureActions : verb == "check" ? CheckActions : Actions;
+            verb == "measure" ? MeasureActions : verb == "check" ? CheckActions : verb == "view" ? ViewActions : Actions;
 
         public static ActionDef? FindAction(string name) => FindAction("edit", name);
 
@@ -528,6 +553,7 @@ namespace AcadClr.Core
             ["edit"] = "对已有实体做几何编辑，返回生成或修改后的实体",
             ["measure"] = "测量：距离、面积、长度、单位换算（只读）",
             ["check"] = "空间校验：重叠、越界、相邻（只读，按包围盒判定）",
+            ["view"] = "视图：缩放与截图（仅实时模式）",
         };
 
         public static string HelpEdit() => HelpVerb("edit");
@@ -583,7 +609,7 @@ namespace AcadClr.Core
         public static TypeDef GenericEntity(string dxfType) =>
             new TypeDef(dxfType, "/model", "其他实体（仅支持公共属性）", true, CommonEntityProps);
 
-        public static IEnumerable<string> AddableTypes => Types.Where(t => t.Name != "document" && t.Name != "device" && t.Name != "sysvar").Select(t => t.Name);
+        public static IEnumerable<string> AddableTypes => Types.Where(t => t.Name != "device" && t.Name != "sysvar").Select(t => t.Name);
 
         // ---------------- plot ----------------
 
@@ -718,6 +744,7 @@ namespace AcadClr.Core
             sb.AppendLine("      /layers  /layer[@name=WALL]  /xrefs  /xref[@name=BASE]  /devices  /device[@name=...]");
             sb.AppendLine("      /layouts  /layout[@name=A3]  /layout[@name=A3]/viewport[1]  （图纸空间实体的父路径是布局）");
             sb.AppendLine("      /blocks  /block[@name=TREE]  /linetypes  /linetype[@name=CENTER]  /sysvars  /sysvar[@name=LTSCALE]");
+            sb.AppendLine("      /documents  /document[@name=plan.dwg]  （打开的图形，仅实时模式；其他命令用 --doc 指定文档）");
             sb.AppendLine("      （索引从 1 开始，[last()] 取最后一个）");
             sb.AppendLine();
             sb.AppendLine("类型：" + string.Join("  ", Types.Select(t => t.Name)));

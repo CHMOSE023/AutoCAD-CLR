@@ -169,7 +169,10 @@ namespace AcadClr.Cli
                 if (!def.Rest)
                 {
                     var value = pos[def.Position];
-                    result.Args[def.Route?.Invoke(value) ?? def.Name] = value;
+                    if (def.Kind == ArgKind.Integer)
+                        result.Args[def.Name] = int.TryParse(value, out int n) ? n
+                            : throw new CliError("usage", $"{cmd.Name} 的 {def.Name} 需要整数，收到 “{value}”。", "用法：acadclr " + cmd.Synopsis);
+                    else result.Args[def.Route?.Invoke(value) ?? def.Name] = value;
                 }
                 else if (def.Kind == ArgKind.StringList) listValues.AddRange(pos.Skip(def.Position));
                 else result.Args[def.Name] = string.Join(" ", pos.Skip(def.Position));

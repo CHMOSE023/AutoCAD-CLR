@@ -151,7 +151,8 @@ AcadClr.Plugin
 - [x] 修改（缺）：copy = `add --from … --prop move=`（多份用 `edit array`）；trim / extend / fillet / chamfer 已有，无需移植
 - [x] 测量校验：`measure distance|area|length|convert`、`check overlap|inside|adjacent`（Engine/Inspect.cs，只读、可进 batch）；
       `measure area|length` 对多个实体给出合计，是 MCP 版没有的；check 判定逻辑与 MCP 版相同（包围盒、容差 1）
-- [ ] 视图
+- [x] 视图：`view zoom`（图形范围 / 窗口 / 目标实体）、`view capture`（移植 AutoCADMCP 的 PrintWindow 截图；缺省只截绘图区；
+      MCP 返回图片，命令行存 PNG）
 - [x] 块与线型：`/blocks`、`/block[@name=]`（get / query / add 定义 / set 改名 / remove 未被参照的），`add --type block` 用已有实体定义块、
       `replace=true` 原地替换；`/linetypes`（get / query / add 加载 / remove 未被使用的）；`insert` 新增 `attributes`，插入时按定义补建属性。
       参照数改为扫描实体统计（`GetBlockReferenceIds` 看不到同一事务里刚插入的参照）；当前图层沿用已有的 `set / --prop currentLayer=`
@@ -160,8 +161,13 @@ AcadClr.Plugin
       convert_length 已在 `measure convert`。系统变量只能读写活动文档，离线时 CLI 自动改走文档模式。
       头变量与系统变量不受事务管理，原子批处理整批放弃时由 Executor 显式恢复旧值。
       2015 版 SDK 没有枚举全部系统变量的 API，所以 query 只覆盖常用清单
-- [ ] 文档
-- [ ] 撤销与日志
+- [x] 文档：`/documents`、`/document[@name=]`（get / query / add 打开或新建 / set current=true 切换 / remove 关闭，有修改要 --force），
+      在 LiveHost 直接处理（应用程序上下文、不加锁、不进 batch）；公共参数 `doc`（`--doc`）让经过 Executor 的命令作用于指定文档。
+      save_as 由已有的 `save --as` 覆盖
+- [x] 撤销：`mark` / `rollback` / `undo N`（命令队列执行并等待完成；按文档记录标记栈，没有标记时拒绝 rollback）。
+      实测结论：插件的修改要用带命令名的 `LockDocument` 才会成为独立撤销步；任何文档锁都会留下撤销步，所以只读请求不加锁；
+      UNDO N 必须在主线程作为独立命令发送。新增 `tests/live.ps1`（16 项，AutoCAD 2020 全部通过）
+- [ ] 操作日志：归入步骤 3 的 Safety（与来源、只读模式一起做）
 - [ ] 已有能力的差异对比
 
 验收：85 个工具的每项能力都能用统一命令完成，CLI 可以调用，`help` 能查到，`tests/` 下有对应用例；

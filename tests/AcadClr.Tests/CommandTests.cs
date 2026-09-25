@@ -71,6 +71,15 @@ namespace AcadClr.Tests
             new object[] { new[] { "measure", "area", "polyline[layer=ROOM]" }, "{\"action\":\"area\",\"selector\":\"polyline[layer=ROOM]\"}" },
             new object[] { new[] { "measure", "distance", "--prop", "from=0,0", "--prop", "to=3,4" }, "{\"action\":\"distance\",\"props\":{\"from\":\"0,0\",\"to\":\"3,4\"}}" },
             new object[] { new[] { "check", "a.dwg", "adjacent", "8A", "--prop", "with=8B" }, "{\"dwg\":\"a.dwg\",\"action\":\"adjacent\",\"path\":\"8A\",\"props\":{\"with\":\"8B\"}}" },
+            new object[] { new[] { "view", "capture", "--prop", "zoom=extents" }, "{\"action\":\"capture\",\"props\":{\"zoom\":\"extents\"}}" },
+            new object[] { new[] { "view", "zoom", "polyline[layer=ROOM]" }, "{\"action\":\"zoom\",\"selector\":\"polyline[layer=ROOM]\"}" },
+            new object[] { new[] { "undo", "3" }, "{\"steps\":3}" },
+            new object[] { new[] { "undo" }, "{}" },
+            new object[] { new[] { "mark", "改前" }, "{\"label\":\"改前\"}" },
+            new object[] { new[] { "rollback" }, "{}" },
+            new object[] { new[] { "get", "/documents" }, "{\"path\":\"/documents\"}" },
+            new object[] { new[] { "query", "line", "--doc", "b.dwg" }, "{\"selector\":\"line\",\"doc\":\"b.dwg\"}" },
+            new object[] { new[] { "set", "/document[@name=b.dwg]", "--prop", "current=true" }, "{\"path\":\"/document[@name=b.dwg]\",\"props\":{\"current\":\"true\"}}" },
             new object[] { new[] { "batch", "--commands", "[{\"command\":\"stats\"}]", "--best-effort", "--force" },
                 "{\"items\":[{\"command\":\"stats\"}],\"bestEffort\":true,\"force\":true}" },
             new object[] { new[] { "plot", "/layout[@name=A3]", "--prop", "output=D:/o.pdf" }, "{\"layout\":\"/layout[@name=A3]\",\"props\":{\"output\":\"D:/o.pdf\"}}" },
@@ -124,6 +133,23 @@ namespace AcadClr.Tests
         public void get缺省路径为根()
         {
             Assert.Equal("/", Prepare("get", "{}").Request!.Items[0].Path);
+        }
+
+        [Fact]
+        public void doc参数交给插件且只用于实时模式()
+        {
+            Assert.Equal("b.dwg", Prepare("stats", "{\"doc\":\"b.dwg\"}").Request!.Doc);
+            Assert.Null(Prepare("stats", "{}").Request!.Doc);
+        }
+
+        [Fact]
+        public void 撤销类命令是undo请求()
+        {
+            var r = Prepare("undo", "{\"steps\":2}").Request!;
+            Assert.Equal("undo", r.Kind);
+            Assert.Equal("undo", r.Items[0].Command);
+            Assert.Equal(2, (int)r.Items[0].Props!["steps"]!);
+            Assert.Equal("mark", Prepare("mark", "{}").Request!.Items[0].Command);
         }
 
         [Fact]
@@ -227,6 +253,12 @@ namespace AcadClr.Tests
         [InlineData("measure", "{\"action\":\"aera\",\"path\":\"8A\"}", "是否想用 area")]
         [InlineData("check", "{\"action\":\"overlap\"}", "缺少目标")]
         [InlineData("check", "{\"action\":\"inside\",\"path\":\"8A\"}", "缺少属性：boundary")]
+        [InlineData("get", "{\"dwg\":\"a.dwg\",\"doc\":\"b.dwg\"}", "不能同时给")]
+        [InlineData("edit", "{\"action\":\"trim\",\"path\":\"8A\",\"props\":{\"edges\":\"8B\"},\"doc\":\"b.dwg\"}", "只能作用于当前文档")]
+        [InlineData("undo", "{\"steps\":500}", "1-200")]
+        [InlineData("view", "{\"action\":\"capture\",\"props\":{\"output\":\"view.png\"}}", "绝对路径")]
+        [InlineData("view", "{\"action\":\"capture\",\"dwg\":\"a.dwg\"}", "没有参数")]
+        [InlineData("lisp", "{\"code\":\"(+ 1 2)\",\"doc\":\"b.dwg\"}", "没有参数")]
         [InlineData("batch", "{}", "需要 items")]
         [InlineData("config", "{}", "只能在命令行使用")]
         [InlineData("sttus", "{}", "是否想用 status")]
@@ -263,6 +295,7 @@ namespace AcadClr.Tests
         [InlineData(new[] { "save", "--dwg", "a.dwg" }, "无需 save")]
         [InlineData(new[] { "create", "a.dwg", "--pid", "1" }, "只用于离线模式")]
         [InlineData(new[] { "get", "/model", "extra" }, "多余的参数")]
+        [InlineData(new[] { "view", "capture", "--dwg", "a.dwg" }, "只用于实时模式")]
         [InlineData(new[] { "get", "--dept", "1" }, "是否想用 --depth")]
         [InlineData(new[] { "get", "--depth", "x" }, "需要整数")]
         [InlineData(new[] { "add", "--prop", "novalue" }, "key=value")]

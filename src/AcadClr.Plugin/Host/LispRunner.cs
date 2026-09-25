@@ -56,7 +56,11 @@ namespace AcadClr.Plugin.Host
         /// 请求线程调用（内部轮询等待，不能占用主线程）。
         /// 命令一旦送进命令行就无法撤回；<paramref name="ct"/> 取消只是停止等待，结果文件留给 <see cref="SweepStale"/> 清理。
         /// </summary>
-        public static Response ViaCommandQueue(string code, int timeoutMs, CancellationToken ct = default)
+        /// <param name="command">
+        /// 先于 LISP 送进命令行的普通命令（例如 "_.UNDO 1"）。UNDO N 放在 LISP 里用 (command ...) 调用时，
+        /// 撤掉的是这次 LISP 求值自己那一组；必须作为独立命令发送，LISP 只负责在它执行完后写结果文件。
+        /// </param>
+        public static Response ViaCommandQueue(string code, int timeoutMs, CancellationToken ct = default, string? command = null)
         {
             SweepStale();
             var outFile = NewOutFile();
@@ -67,7 +71,7 @@ namespace AcadClr.Plugin.Host
                 // 不要改成在主线程（Idle 回调，属应用程序上下文）以 activate=true 调用：
                 // 实测 AutoCAD 会就地同步执行，(command "._trim" ...) 在应用程序上下文里运行导致 0xC0000005 崩溃。
                 // 必须是“一整行 + 一个回车”：中间有换行会让末尾回车变成重复上一条命令的空回车，导致崩溃
-                var body = LispWrap.Wrap(code, outFile, singleLine: true) + "\n";
+                var body = (command != null ? command.Trim() + "\n" : "") + LispWrap.Wrap(code, outFile, singleLine: true) + "\n";
                 var doc = MainThread.Invoke(ActiveDocument, 10_000, ct);
                 doc.SendStringToExecute(body, false, false, false);
 

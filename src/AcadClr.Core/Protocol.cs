@@ -83,7 +83,7 @@ namespace AcadClr.Core
     /// <summary>发往插件的一次请求。实时模式走命名管道，离线模式写成文件交给 accoreconsole。</summary>
     public sealed class Request
     {
-        /// <summary>run | status | save | ping</summary>
+        /// <summary>run | status | save | lisp | script | plot | view | undo | ping</summary>
         [JsonProperty("kind")] public string Kind { get; set; } = "run";
 
         [JsonProperty("items")] public List<BatchItem> Items { get; set; } = new List<BatchItem>();
@@ -104,6 +104,10 @@ namespace AcadClr.Core
 
         /// <summary>lisp：走命令队列执行（(command ...) 需要文档上下文时用）。</summary>
         [JsonProperty("commandQueue")] public bool CommandQueue { get; set; }
+
+        /// <summary>实时模式：要操作的文档（文件名、完整路径或序号）；不填为当前文档。</summary>
+        [JsonProperty("doc", NullValueHandling = NullValueHandling.Ignore)]
+        public string? Doc { get; set; }
 
         /// <summary>实时模式：本次请求的超时（毫秒）；不填用插件默认值（一般 120 秒，打印 180 秒）。</summary>
         [JsonProperty("timeoutMs", NullValueHandling = NullValueHandling.Ignore)]

@@ -24,7 +24,7 @@ AcadClr.Core.dll：协议、路径 / 选择器解析、属性 schema、help —�
 | `src/AcadClr.Core` | `Protocol.cs` 请求 / 响应，`PathSyntax.cs` 路径与选择器，`Schema.cs` 类型与属性定义（help 与校验的唯一来源），`Commands.cs` 命令与参数定义（命令行解析、help 的唯一来源），`Values.cs` 值解析 |
 | `src/AcadClr.Plugin` | `Engine/Executor.cs` 执行批处理（外层事务 + 每条一个嵌套事务），`Engine/Mutate.cs` 增改，`Engine/Nodes.cs` 读取，`Host/` 管道服务、主线程调度、离线入口 |
 | `src/AcadClr.Cli` | `acadclr.exe`：`Program.cs` 命令行 → JSON 参数，`Dispatcher.cs` 参数 → 请求并选择实时 / 离线传输，`Output.cs` 文本与 JSON 输出 |
-| `tests` | `AcadClr.Tests` 单元测试（`dotnet test`，不需要 AutoCAD），`smoke.ps1` 离线冒烟测试 |
+| `tests` | `AcadClr.Tests` 单元测试（`dotnet test`，不需要 AutoCAD），`smoke.ps1` 离线冒烟测试，`live.ps1` 实时模式测试（需要已加载插件的 AutoCAD） |
 
 ## 构建
 
@@ -94,6 +94,8 @@ acadclr stats plan.dwg
 | `stats` | 按类型、图层统计实体，并给出图形范围 |
 | `measure <动作> [目标]` | 测量：`distance` `area` `length` `convert`（单位换算） |
 | `check <动作> <目标>` | 空间校验（按包围盒）：`overlap` 重叠、`inside` 越界、`adjacent` 相邻，结果 `PASS` / `FAIL` |
+| `view zoom\|capture [目标]` | 缩放视图、截图为 PNG（实时模式） |
+| `mark [标签]` / `rollback` / `undo [N]` | 打撤销标记、回到标记、撤销 N 步（实时模式；每次 acadclr 修改是一个撤销步） |
 | `lisp "<expr>" \| --file f.lsp` | 执行 AutoLISP 并返回值；实时模式加 `--cmd` 走命令队列，离线模式加 `--save` 保存 |
 | `script f.scr \| --text "..."` | 执行脚本；离线模式可以对多个 DWG 批量运行，文件名支持通配符 |
 | `save [--as path]` | 保存（实时模式） |
@@ -101,7 +103,7 @@ acadclr stats plan.dwg
 | `instances` | 列出加载了插件的 AutoCAD 实例 |
 | `help [type\|命令] [--json]` | 查看类型的属性，或命令的参数（命令行写法与 JSON / MCP 参数名对照） |
 
-全局选项：`--json`、`--dwg`、`--acad`、`--pid`、`--timeout`。其余选项属于各自的命令（`--best-effort`、`--stop-on-error` 只用于 `batch`，
+全局选项：`--json`、`--dwg`、`--acad`、`--pid`、`--doc`（实时模式下操作指定的已打开文档，不必先切换）、`--timeout`。其余选项属于各自的命令（`--best-effort`、`--stop-on-error` 只用于 `batch`，
 `--force` 用于 `set`、`remove`、`edit`、`batch`），用错命令会直接报错；`acadclr help <命令>` 查看某个命令的全部参数。
 
 退出码：`0` 成功，`1` 有操作失败，`2` 用法错误或无法连接。
@@ -124,6 +126,8 @@ acadclr stats plan.dwg
 /linetype[@name=CENTER]    线型
 /sysvars                   常用系统变量
 /sysvar[@name=PDMODE]      任意系统变量（set 用 value=）
+/documents                 AutoCAD 里打开的图形（实时模式）：add 打开 / 新建，set current=true 切换，remove 关闭
+/document[@name=plan.dwg]  一个打开的图形
 ```
 
 选择器：`line[layer=WALL][length>=3000]`、`entity[color=1]`、`text[text~=客厅]`、`layer[frozen=true]`。

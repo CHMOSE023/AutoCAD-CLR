@@ -40,6 +40,19 @@ namespace AcadClr.Plugin.Engine
             _file = file;
         }
 
+        /// <summary>解析实体目标（路径、句柄列表或选择器），供 view 等不走批处理的动作使用。</summary>
+        public List<ObjectId> ResolveEntities(string text)
+        {
+            using (var tr = _db.TransactionManager.StartTransaction())
+            {
+                _tr = tr;
+                var ids = TargetEntities(text, new List<ItemResult>(), true, new ItemResult());
+                tr.Commit();
+                if (ids.Count == 0) throw new CliError("not_found", $"目标 “{text}” 没有匹配任何实体。");
+                return ids;
+            }
+        }
+
         public Response Run(Request req) =>
             req.Items.Any(i => IsDirect(i, req.Items, 0)) ? RunSequential(req) : RunAtomic(req);
 
@@ -924,6 +937,10 @@ namespace AcadClr.Plugin.Engine
                 case "linetype":
                     if (segs.Count == 1) return new Target(TargetKind.Linetype, ResolveLinetype(head, path));
                     break;
+                case "documents":
+                case "document":
+                    throw new CliError("live_only", "/documents 只用于实时模式，且不能和其他操作放在同一个 batch 里。",
+                        "离线模式一次只处理一个文件（dwg 参数）；实时模式单独执行文档操作");
                 case "sysvars":
                     if (segs.Count == 1) return new Target(TargetKind.Sysvars, ObjectId.Null);
                     if (segs.Count == 2 && segs[1].Name == "sysvar") return ResolveSysvar(segs[1], path);

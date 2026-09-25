@@ -1,9 +1,11 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using AcadClr.Core;
 using AcadClr.Plugin.Engine;
+using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.DatabaseServices;
 using Newtonsoft.Json.Linq;
 using CoreApp = Autodesk.AutoCAD.ApplicationServices.Core.Application;
@@ -36,10 +38,12 @@ namespace AcadClr.Plugin.Host
                 case "ping":
                     return new Response { Data = new JObject { ["pid"] = Process.GetCurrentProcess().Id } };
                 case "status":
-                    return MainThread.Invoke(Status, timeout, ct);
+                    return MainThread.Invoke(() => Status(req.Doc), timeout, ct);
                 case "save":
-                    return MainThread.Invoke(() => Save(req.SaveAs), timeout, ct);
+                    return MainThread.Invoke(() => Save(req.Doc, req.SaveAs), timeout, ct);
                 case "run":
+                    // 打开 / 关闭 / 切换文档要在应用程序上下文里做，不能持有文档锁或开着事务
+                    if (req.Items.Any(Documents.Targets)) return MainThread.Invoke(() => Documents.Run(req), timeout, ct);
                     return MainThread.Invoke(() => Run(req), timeout, ct);
                 case "lisp":
                     if (string.IsNullOrWhiteSpace(req.Code)) return Response.Fail("bad_request", "lisp 缺少代码。");
@@ -50,6 +54,16 @@ namespace AcadClr.Plugin.Host
                     // 请求线程：内部轮询等待命令完成，不能占用主线程。
                     // 打印命令一旦送出就无法撤回，不响应取消，否则会在打印中途切回布局
                     return Plotting.Live(req, req.TimeoutMs is int pt && pt > 0 ? pt : PlotTimeoutMs);
+                case "undo":
+                    // 请求线程：内部等待命令队列执行完，不能占用主线程
+                    return UndoMarks.Run(req, timeout, ct);
+                case "view":
+                    return MainThread.Invoke(() =>
+                    {
+                        var doc = CoreApp.DocumentManager.MdiActiveDocument
+                            ?? throw new CliError("no_document", "AutoCAD 当前没有打开的图形。");
+                        return Views.Run(doc, req.Items.FirstOrDefault() ?? new BatchItem(), t => new Executor(doc.Database, doc.Name).ResolveEntities(t));
+                    }, timeout, ct);
                 case "script":
                     if (string.IsNullOrWhiteSpace(req.Code)) return Response.Fail("bad_request", "script 缺少内容。");
                     return MainThread.Invoke(() => LispRunner.QueueScript(req.Code!), timeout, ct);
@@ -60,13 +74,17 @@ namespace AcadClr.Plugin.Host
 
         private static Response Run(Request req)
         {
-            var doc = CoreApp.DocumentManager.MdiActiveDocument;
-            if (doc == null) return Response.Fail("no_document", "AutoCAD 当前没有打开的图形。", "先在 AutoCAD 里新建或打开一个 DWG");
+            var doc = Documents.Resolve(req.Doc);
 
             Response resp;
             var exec = new Executor(doc.Database, doc.Name);
-            using (doc.LockDocument())
-                resp = exec.Run(req);
+            // 有修改时带命令名加锁：这次请求的修改在 AutoCAD 里成为一个独立的撤销步（名为 ACADCLR），
+            // acadclr undo 1 / 用户按 Ctrl+Z 正好撤销上一次操作；不带命令名时修改不单独成组，UNDO 1 撤不到它。
+            // 只读请求不加锁（应用程序上下文里读数据库不需要锁）：实测任何文档锁都会留下一个撤销步，
+            // 查询之后按一次 Ctrl+Z 就会撤了个空
+            bool mutating = req.Items.Any(i => i.Verb == "add" || i.Verb == "set" || i.Verb == "remove" || i.Verb == "edit");
+            if (!mutating) resp = exec.Run(req);
+            else using (doc.LockDocument(DocumentLockMode.Write, "ACADCLR", "ACADCLR", false)) resp = exec.Run(req);
 
             if (exec.CommittedChanges)
             {
@@ -75,10 +93,10 @@ namespace AcadClr.Plugin.Host
             return resp;
         }
 
-        private static Response Status()
+        private static Response Status(string? docName)
         {
             var dm = CoreApp.DocumentManager;
-            var doc = dm.MdiActiveDocument;
+            var doc = docName == null ? dm.MdiActiveDocument : Documents.Resolve(docName);
             var data = new JObject
             {
                 ["mode"] = "live",
@@ -99,10 +117,9 @@ namespace AcadClr.Plugin.Host
             return new Response { Document = doc?.Name, Data = data };
         }
 
-        private static Response Save(string? saveAs)
+        private static Response Save(string? docName, string? saveAs)
         {
-            var doc = CoreApp.DocumentManager.MdiActiveDocument;
-            if (doc == null) return Response.Fail("no_document", "AutoCAD 当前没有打开的图形。");
+            var doc = Documents.Resolve(docName);
 
             var target = saveAs ?? doc.Name;
             if (saveAs == null && !(Path.IsPathRooted(doc.Name) && File.Exists(doc.Name)))

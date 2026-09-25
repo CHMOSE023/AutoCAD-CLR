@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Text;
 using AcadClr.Core;
@@ -49,6 +50,26 @@ namespace AcadClr.Cli
                 Console.WriteLine(resp.Data?["value"]?.ToString() ?? "nil");
                 if (resp.Saved == true) Console.WriteLine("已保存：" + resp.Document);
                 else if (resp.Saved == false) Console.Error.WriteLine("注意：文件未发生变化（代码没有修改图形，或保存失败）。");
+                return 0;
+            }
+
+            if (verb == "view" && resp.Data != null)
+            {
+                // 命令行不打印 base64：没指定 output 时存到临时目录
+                if (resp.Images?.Count > 0 && resp.Data["file"] == null)
+                    Dispatcher.SaveImage(resp, Path.Combine(Path.GetTempPath(), "acadclr-view-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".png"));
+                if (resp.Data["file"] != null) Console.WriteLine($"已截图：{resp.Data["file"]}（{resp.Data["size"]}，{resp.Data["sizeKB"]} KB，{resp.Data["region"]}）");
+                // zoom 的结果在 data 上；capture 先缩放时在 data.zoomed 里
+                var zoom = resp.Data["zoom"] != null ? resp.Data : resp.Data["zoomed"] as Newtonsoft.Json.Linq.JObject;
+                if (zoom != null) Console.WriteLine($"已缩放到{zoom["zoom"]}：{zoom["min"]} .. {zoom["max"]}（{zoom["space"]}）");
+                if (resp.Data["note"] != null) Console.WriteLine("注意：" + resp.Data["note"]);
+                return 0;
+            }
+
+            if ((verb == "mark" || verb == "rollback" || verb == "undo") && resp.Data != null)
+            {
+                var marks = resp.Data["marks"] as Newtonsoft.Json.Linq.JArray;
+                Console.WriteLine(resp.Data["result"] + "。" + (marks?.Count > 0 ? "标记：" + string.Join(" → ", marks) : "没有标记"));
                 return 0;
             }
 

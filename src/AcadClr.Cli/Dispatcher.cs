@@ -50,6 +50,8 @@ namespace AcadClr.Cli
             var a = Commands.Normalize(cmd, rawArgs);
 
             var dwg = cmd.Name == "script" ? null : a.GetString("dwg");
+            if (dwg != null && a.GetString("doc") != null)
+                throw new CliError("usage", "dwg（离线文件）与 doc（实时模式的文档）不能同时给。");
             int? pid = a.GetInt("pid");
             int offlineTimeout = a.GetInt("timeout") ?? OfflineTimeoutSec;
             int? liveTimeoutMs = a.GetInt("timeout") * 1000;
@@ -57,6 +59,7 @@ namespace AcadClr.Cli
             Call Live(Request req)
             {
                 req.TimeoutMs = liveTimeoutMs;
+                req.Doc ??= a.GetString("doc");
                 return new Call { Command = cmd.Name, Request = req, Execute = () => LiveTransport.Send(req, pid) };
             }
 
@@ -119,6 +122,26 @@ namespace AcadClr.Cli
                         throw new CliError("usage", $"{cmd.Name} {action.Name} 不需要目标。", $"运行 acadclr help {cmd.Name} {action.Name}");
                     action.CheckProps(new BatchItem { Props = (JObject?)a["props"] }.GetProps());
                     return Run(new BatchItem { Command = cmd.Name, Action = action.Name, Path = path, Selector = selector, Props = (JObject?)a["props"] });
+                }
+
+                case "view":
+                {
+                    var action = Schema.RequireAction("view", a.GetString("action"));
+                    var props = (JObject?)a["props"];
+                    var p = action.CheckProps(new BatchItem { Props = props }.GetProps());
+                    var req = new Request
+                    {
+                        Kind = "view",
+                        Items = { new BatchItem { Command = "view", Action = action.Name, Path = a.GetString("path"), Selector = a.GetString("selector"), Props = props } },
+                    };
+                    var call = Live(req);
+                    if (p.TryGetValue("output", out var output))
+                    {
+                        if (!Path.IsPathRooted(output)) throw new CliError("usage", "output 必须是绝对路径。", "例：output=D:\\out\\view.png");
+                        var send = call.Execute;
+                        call.Execute = () => SaveImage(send(), output);
+                    }
+                    return call;
                 }
 
                 case "batch":
@@ -188,6 +211,20 @@ namespace AcadClr.Cli
                 case "save":
                     return Live(new Request { Kind = "save", SaveAs = a.GetString("saveAs") });
 
+                case "mark":
+                case "rollback":
+                case "undo":
+                {
+                    var props = new JObject();
+                    if (a.GetString("label") is string label) props["label"] = label;
+                    if (a.GetInt("steps") is int steps)
+                    {
+                        if (steps < 1 || steps > 200) throw new CliError("usage", "undo 的步数应在 1-200 之间。");
+                        props["steps"] = steps;
+                    }
+                    return Live(new Request { Kind = "undo", Items = { new BatchItem { Command = cmd.Name, Props = props } } });
+                }
+
                 case "create":
                     return Offline(new Request { Create = true });
 
@@ -207,6 +244,18 @@ namespace AcadClr.Cli
                 default:
                     throw new CliError("usage", $"命令 {cmd.Name} 尚未实现。");
             }
+        }
+
+        /// <summary>把响应里的第一张图写成文件，路径记入 data.file。</summary>
+        public static Response SaveImage(Response resp, string file)
+        {
+            if (resp.Images == null || resp.Images.Count == 0) return resp;
+            var dir = Path.GetDirectoryName(file);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            File.WriteAllBytes(file, Convert.FromBase64String(resp.Images[0].Data));
+            resp.Data ??= new JObject();
+            resp.Data["file"] = file;
+            return resp;
         }
 
         /// <summary>set / remove / edit 的目标：path 与 selector 必须给且只给一个。</summary>
@@ -252,6 +301,9 @@ namespace AcadClr.Cli
             // 命令式动作（trim / extend / fillet / chamfer）：生成 (vl-cmdf ...)，实时走命令队列，离线由 accoreconsole 打开图纸执行并保存
             var p = action.CheckProps(new BatchItem { Props = props }.GetProps());
 
+            if (a.GetString("doc") != null)
+                throw new CliError("usage", $"edit {action.Name} 通过 AutoCAD 命令执行，只能作用于当前文档。",
+                    "先切换：acadclr set \"/document[@name=...]\" --prop current=true");
             var code = CommandEdits.Build(action, path ?? selector!, p);
             if (dwg != null)
             {

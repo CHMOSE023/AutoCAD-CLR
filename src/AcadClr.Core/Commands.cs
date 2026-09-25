@@ -85,8 +85,12 @@ namespace AcadClr.Core
         {
             Name = name; Synopsis = synopsis; Summary = summary; Modes = modes; Writes = writes;
             Args = args.ToList();
+            // 公共参数统一排在命令自己的参数之后：dwg、pid、doc、timeout
+            var doc = Args.FirstOrDefault(a => a.Name == "doc");
+            if (doc != null) Args.Remove(doc);
             if ((modes & CommandModes.Offline) != 0 && !Args.Any(a => a.Name == "dwg")) Args.Add(Commands.DwgArg());
             if ((modes & CommandModes.Live) != 0) Args.Add(Commands.PidArg());
+            if (doc != null) Args.Add(doc);
             if (modes != CommandModes.None) Args.Add(Commands.TimeoutArg());
         }
 
@@ -104,6 +108,7 @@ namespace AcadClr.Core
 
         internal static ArgDef DwgArg() => A("dwg", ArgKind.String, "离线模式：要读写的 DWG 文件；不填则操作运行中的 AutoCAD", option: "--dwg");
         internal static ArgDef PidArg() => A("pid", ArgKind.Integer, "实时模式：AutoCAD 进程号；不填连接最近启动的实例", option: "--pid");
+        private static ArgDef Doc() => A("doc", ArgKind.String, "实时模式：要操作的文档（文件名或序号，见 get /documents）；不填为当前文档", option: "--doc");
         internal static ArgDef TimeoutArg() => A("timeout", ArgKind.Integer, "超时（秒）", option: "--timeout");
 
         private static ArgDef Props(string desc = "属性，如 {\"layer\":\"WALL\",\"color\":1}") => A("props", ArgKind.Object, desc, option: "--prop");
@@ -125,35 +130,41 @@ namespace AcadClr.Core
 
         public static readonly List<CommandDef> All = new List<CommandDef>
         {
-            new CommandDef("status", "status", "连接状态与当前图形信息", CommandModes.Both, false),
+            new CommandDef("status", "status", "连接状态与当前图形信息", CommandModes.Both, false, Doc()),
 
             new CommandDef("get", "get <path> [--depth N]", "读取元素（及子元素）", CommandModes.Both, false,
+                Doc(),
                 A("path", ArgKind.String, "路径，如 /model、/layers、/entity[@handle=2A3]", pos: 0, def: "/"),
                 A("depth", ArgKind.Integer, "展开子元素的层数", option: "--depth"),
                 Limit()) { Batchable = true },
 
             new CommandDef("query", "query <selector>", "按选择器查找，如 line[layer=WALL][length>=3000]", CommandModes.Both, false,
+                Doc(),
                 A("selector", ArgKind.String, "选择器，如 line[layer=WALL][length>=3000]", pos: 0, option: "--selector", required: true),
                 Limit()) { Batchable = true },
 
             new CommandDef("add", "add <parent> --type T", "添加元素；--from <path> 克隆已有实体", CommandModes.Both, true,
+                Doc(),
                 A("parent", ArgKind.String, "父路径：/model、/layers、/layout[@name=A3] 等", pos: 0, def: "/model"),
                 A("type", ArgKind.String, "元素类型（help 查看全部类型）", option: "--type"),
                 A("from", ArgKind.String, "克隆该路径的实体（与 type 二选一），可配合 props 的 move", option: "--from"),
                 Props()) { Batchable = true },
 
             new CommandDef("set", "set <path|selector>", "修改属性（含 move / rotate / scale）", CommandModes.Both, true,
+                Doc(),
                 Target("目标路径", 0, RoutePathOrSelector),
                 SelectorArg("目标选择器（必须带条件）"),
                 Props(),
                 Force("选择器不带条件时也执行")) { Batchable = true },
 
             new CommandDef("remove", "remove <path|selector>", "删除（一次超过 30 个需 --force）", CommandModes.Both, true,
+                Doc(),
                 Target("目标路径", 0, RoutePathOrSelector),
                 SelectorArg("目标选择器（必须带条件）"),
                 Force("允许一次删除超过 30 个元素")) { Batchable = true },
 
             new CommandDef("edit", "edit <动作> <目标>", "偏移 镜像 分解 打断 合并 阵列 修剪 延伸 倒圆角 倒角", CommandModes.Both, true,
+                Doc(),
                 A("action", ArgKind.String, "动作：offset mirror explode break join array trim extend fillet chamfer", pos: 0, required: true),
                 Target("目标：路径、句柄、句柄@拾取点，多个用 ; 分隔", 1, RouteEditTarget),
                 SelectorArg("目标选择器"),
@@ -161,29 +172,38 @@ namespace AcadClr.Core
                 Force("选择器命中过多时也执行")) { Batchable = true },
 
             new CommandDef("measure", "measure <动作> [目标]", "测量：距离 面积 长度 单位换算", CommandModes.Both, false,
+                Doc(),
                 A("action", ArgKind.String, "动作：distance area length convert", pos: 0, required: true),
                 Target("目标：路径、句柄，多个用 ; 分隔（distance、convert 不需要）", 1, RouteEditTarget),
                 SelectorArg("目标选择器"),
                 Props("动作参数（help measure <动作> 查看）")) { Batchable = true },
 
             new CommandDef("check", "check <动作> <目标>", "空间校验：重叠 越界 相邻（按包围盒）", CommandModes.Both, false,
+                Doc(),
                 A("action", ArgKind.String, "动作：overlap inside adjacent", pos: 0, required: true),
                 Target("目标：路径、句柄，多个用 ; 分隔", 1, RouteEditTarget),
                 SelectorArg("目标选择器"),
                 Props("动作参数（help check <动作> 查看）")) { Batchable = true },
+
+            new CommandDef("view", "view <动作> [目标]", "视图：zoom 缩放、capture 截图（实时模式）", CommandModes.Live, false,
+                A("action", ArgKind.String, "动作：zoom capture", pos: 0, required: true),
+                Target("可选：缩放到这些实体（路径、句柄，多个用 ; 分隔）", 1, RouteEditTarget),
+                SelectorArg("可选：缩放到选择器匹配的实体"),
+                Props("动作参数（help view <动作> 查看）")),
 
             new CommandDef("plot", "plot [布局]", "打印到 PDF（acadclr help plot）", CommandModes.Both, false,
                 A("layout", ArgKind.String, "布局名或路径 /layout[@name=A3]；不填时实时模式打印当前布局，离线模式打印 Model", pos: 0),
                 Props("打印参数（help plot 查看）")),
 
             new CommandDef("batch", "batch", "批量执行 JSON（--input 文件 / --commands 字符串 / 标准输入）", CommandModes.Both, true,
+                Doc(),
                 A("items", ArgKind.Array, "操作列表：[{\"command\":\"add\",\"parent\":\"/model\",...}]，\"$N\" 引用第 N 条的结果路径", option: "--commands"),
                 A("input", ArgKind.String, "从 JSON 文件读取操作列表", option: "--input"),
                 A("bestEffort", ArgKind.Boolean, "保留成功的部分（默认任一失败整批回滚）", option: "--best-effort"),
                 A("stopOnError", ArgKind.Boolean, "遇到第一个失败就停止", option: "--stop-on-error"),
                 Force("对所有条目生效的 force")),
 
-            new CommandDef("stats", "stats", "按类型、图层统计实体，给出图形范围", CommandModes.Both, false) { Batchable = true },
+            new CommandDef("stats", "stats", "按类型、图层统计实体，给出图形范围", CommandModes.Both, false, Doc()) { Batchable = true },
 
             new CommandDef("lisp", "lisp \"<expr>\" | --file f.lsp", "执行 AutoLISP 并返回值（--cmd 走命令队列，离线加 --save 保存）", CommandModes.Both, true,
                 A("code", ArgKind.String, "AutoLISP 代码，可以有多个表达式，返回最后一个的值", pos: 0),
@@ -197,7 +217,16 @@ namespace AcadClr.Core
                 new ArgDef("dwg", ArgKind.StringList, "离线模式：一个或多个 DWG，支持通配符") { Position = 1, Rest = true, Option = "--dwg" },
                 A("save", ArgKind.Boolean, "离线模式：执行后保存", option: "--save")),
 
+            new CommandDef("mark", "mark [标签]", "打 undo 标记：之后 rollback 回到这里（实时模式，当前文档）", CommandModes.Live, true,
+                A("label", ArgKind.String, "标记名，便于辨认；缺省为 #序号", pos: 0)),
+
+            new CommandDef("rollback", "rollback", "撤销回到最近一个 mark（没有 mark 时拒绝）", CommandModes.Live, true),
+
+            new CommandDef("undo", "undo [N]", "撤销最近 N 步（AutoCAD 的 UNDO N，粒度由 AutoCAD 决定）", CommandModes.Live, true,
+                A("steps", ArgKind.Integer, "步数 1-200", pos: 0, def: "1")),
+
             new CommandDef("save", "save [--as path]", "保存（实时模式）", CommandModes.Live, true,
+                Doc(),
                 A("saveAs", ArgKind.String, "另存为该路径", option: "--as")),
 
             new CommandDef("create", "create <file.dwg>", "新建空白 DWG（离线）", CommandModes.Offline, true,

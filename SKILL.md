@@ -79,6 +79,15 @@ acadclr batch --dwg plan.dwg --input plan.json   # 离线模式，自动写回�
 - 其他系统变量：`get "/sysvar[@name=PDMODE]"`、`set "/sysvar[@name=PDMODE]" --prop value=3`；`get /sysvars` 列出常用变量。
   离线模式读写系统变量要用 accoreconsole 打开图纸，比普通离线操作慢一些。
 
+## 视图、文档与撤销（实时模式）
+
+- **画完要看一眼**：`view capture --prop zoom=extents --prop maxWidth=1200` 截图（MCP 直接返回图片，命令行存成 PNG）。
+  只看局部：`view capture "polyline[layer=ROOM]"` 先缩放到这些实体再截。
+- 多张图：`get /documents` 列出；其他命令加 `--doc plan.dwg` 直接操作指定文档，不必切换；
+  `add /documents --type document --prop path=D:\work\a.dwg` 打开，`set "/document[@name=a.dwg]" --prop current=true` 切换，
+  `remove "/document[@name=a.dwg]"` 关闭（有未保存修改时要先 `save --doc a.dwg`，或加 `--force` 丢弃）。
+- 试探性修改前 `mark`，不满意就 `rollback` 回到标记；只撤最近几步用 `undo N`。每次 acadclr 修改是一个撤销步，查询不占撤销步。
+
 ## 测量与校验（只读，可放进 batch）
 
 - `measure area|length <目标>`：面积 / 周长、长度，选择器命中多个时给出合计。`measure distance --prop from=x,y --prop to=x,y`；
