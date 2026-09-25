@@ -155,7 +155,11 @@ AcadClr.Plugin
 - [x] 块与线型：`/blocks`、`/block[@name=]`（get / query / add 定义 / set 改名 / remove 未被参照的），`add --type block` 用已有实体定义块、
       `replace=true` 原地替换；`/linetypes`（get / query / add 加载 / remove 未被使用的）；`insert` 新增 `attributes`，插入时按定义补建属性。
       参照数改为扫描实体统计（`GetBlockReferenceIds` 看不到同一事务里刚插入的参照）；当前图层沿用已有的 `set / --prop currentLayer=`
-- [ ] 系统
+- [x] 系统：单位做成文档属性（`units` `measurement` `lunits` `luprec` `aunits` `auprec` `ltscale` `dimscale`，`set /` 修改）；
+      `/sysvars`（常用清单，沿用 MCP 版）、`/sysvar[@name=X]`（任意变量，get / set value=）、`query "sysvar[...]"`（在常用清单里查）；
+      convert_length 已在 `measure convert`。系统变量只能读写活动文档，离线时 CLI 自动改走文档模式。
+      头变量与系统变量不受事务管理，原子批处理整批放弃时由 Executor 显式恢复旧值。
+      2015 版 SDK 没有枚举全部系统变量的 API，所以 query 只覆盖常用清单
 - [ ] 文档
 - [ ] 撤销与日志
 - [ ] 已有能力的差异对比

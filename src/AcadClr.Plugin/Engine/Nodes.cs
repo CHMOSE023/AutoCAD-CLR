@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using AcadClr.Core;
 using Autodesk.AutoCAD.DatabaseServices;
@@ -308,6 +309,13 @@ namespace AcadClr.Plugin.Engine
                     ["file"] = file ?? db.Filename,
                     ["version"] = FormatVersion(db.OriginalFileVersion),
                     ["units"] = Acad.Fmt(db.Insunits),
+                    ["measurement"] = db.Measurement == MeasurementValue.Metric ? "metric" : "imperial",
+                    ["lunits"] = db.Lunits.ToString(CultureInfo.InvariantCulture),
+                    ["luprec"] = db.Luprec.ToString(CultureInfo.InvariantCulture),
+                    ["aunits"] = db.Aunits.ToString(CultureInfo.InvariantCulture),
+                    ["auprec"] = db.Auprec.ToString(CultureInfo.InvariantCulture),
+                    ["ltscale"] = Values.Num(db.Ltscale),
+                    ["dimscale"] = Values.Num(db.Dimscale),
                     ["currentLayer"] = clayer.Name,
                     ["currentLayout"] = Layouts.CurrentName(),
                     ["layers"] = CountLayers(db, tr).ToString(),

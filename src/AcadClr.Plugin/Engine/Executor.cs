@@ -26,6 +26,9 @@ namespace AcadClr.Plugin.Engine
 
         private readonly Database _db;
         private readonly string? _file;
+
+        /// <summary>不受事务管理的修改（系统变量、数据库头变量）的恢复动作；原子批处理整批放弃时倒序执行。</summary>
+        private readonly List<Action> _compensate = new List<Action>();
         private Transaction _tr = null!;
 
         /// <summary>本次执行是否提交了修改（离线模式据此决定是否写回文件）。</summary>
@@ -250,6 +253,7 @@ namespace AcadClr.Plugin.Engine
                 if (failed > 0 && !req.BestEffort && mutating)
                 {
                     outer.Abort();
+                    for (int k = _compensate.Count - 1; k >= 0; k--) _compensate[k]();
                     resp.AtomicRolledBack = true;
                 }
                 else
@@ -324,6 +328,14 @@ namespace AcadClr.Plugin.Engine
                 case TargetKind.Xref:
                     node = Xrefs.Node(_db, _tr, (BlockTableRecord)_tr.GetObject(t.Id, OpenMode.ForRead));
                     break;
+                case TargetKind.Sysvars:
+                    Sysvars.RequireActive(_db);
+                    node = new Node { Path = "/sysvars", Type = "sysvars", Props = { ["count"] = Sysvars.Common.Length.ToString(), ["note"] = "常用变量；任意变量用 /sysvar[@name=X]" } };
+                    if ((item.Depth ?? 1) >= 1) node.Children = CommonSysvars().ToList();
+                    break;
+                case TargetKind.Sysvar:
+                    node = Sysvars.Node(t.Name!);
+                    break;
                 case TargetKind.Blocks:
                     var bs = Symbols.Blocks(_db, _tr).ToList();
                     node = new Node { Path = "/blocks", Type = "blocks", Props = { ["count"] = bs.Count.ToString() } };
@@ -374,6 +386,18 @@ namespace AcadClr.Plugin.Engine
             }
             r.Path = node.Path;
             r.Node = node;
+        }
+
+        /// <summary>常用系统变量；个别版本没有的变量跳过。</summary>
+        private static IEnumerable<Node> CommonSysvars()
+        {
+            foreach (var name in Sysvars.Common)
+            {
+                Node? n = null;
+                try { n = Sysvars.Node(name); }
+                catch (CliError) { /* 该版本没有这个变量 */ }
+                if (n != null) yield return n;
+            }
         }
 
         private Node ModelNode(int depth, int limit)
@@ -433,6 +457,14 @@ namespace AcadClr.Plugin.Engine
                     var n = Nodes.Layer(_db, _tr, l);
                     if (sel.Matches(n.Type, a => Prop(n, a))) list.Add(n);
                 }
+                return list;
+            }
+
+            if (sel.Type == "sysvar")
+            {
+                Sysvars.RequireActive(_db);
+                foreach (var n in CommonSysvars())
+                    if (sel.Matches(n.Type, a => Prop(n, a))) list.Add(n);
                 return list;
             }
 
@@ -675,7 +707,7 @@ namespace AcadClr.Plugin.Engine
                 switch (t.Kind)
                 {
                     case TargetKind.Document:
-                        Mutate.ApplyDocument(_db, _tr, props);
+                        _compensate.AddRange(Mutate.ApplyDocument(_db, _tr, props));
                         Done(r, Nodes.Document(_db, _tr, _file));
                         break;
                     case TargetKind.Layer:
@@ -687,6 +719,11 @@ namespace AcadClr.Plugin.Engine
                         var e = (Entity)_tr.GetObject(t.Id, OpenMode.ForWrite);
                         Mutate.ApplyEntity(_db, _tr, e, Nodes.SchemaOf(Nodes.TypeOf(e)), props, Verbs.Set);
                         Collect(r, Nodes.Entity(_tr, e));
+                        break;
+                    case TargetKind.Sysvar:
+                        Sysvars.RequireActive(_db);
+                        _compensate.Add(Sysvars.Set(t.Name!, props));
+                        Collect(r, Sysvars.Node(t.Name!));
                         break;
                     case TargetKind.Block:
                         var blk = (BlockTableRecord)_tr.GetObject(t.Id, OpenMode.ForRead);
@@ -815,7 +852,7 @@ namespace AcadClr.Plugin.Engine
 
         // ------------------------------------------------------------------ 路径解析
 
-        private enum TargetKind { Document, Model, Layers, Layer, Entity, Xrefs, Xref, Layouts, Layout, Devices, Device, Blocks, Block, Linetypes, Linetype }
+        private enum TargetKind { Document, Model, Layers, Layer, Entity, Xrefs, Xref, Layouts, Layout, Devices, Device, Blocks, Block, Linetypes, Linetype, Sysvars, Sysvar }
 
         private readonly struct Target
         {
@@ -887,6 +924,13 @@ namespace AcadClr.Plugin.Engine
                 case "linetype":
                     if (segs.Count == 1) return new Target(TargetKind.Linetype, ResolveLinetype(head, path));
                     break;
+                case "sysvars":
+                    if (segs.Count == 1) return new Target(TargetKind.Sysvars, ObjectId.Null);
+                    if (segs.Count == 2 && segs[1].Name == "sysvar") return ResolveSysvar(segs[1], path);
+                    break;
+                case "sysvar":
+                    if (segs.Count == 1) return ResolveSysvar(head, path);
+                    break;
                 case "devices":
                     if (segs.Count == 1) return new Target(TargetKind.Devices, ObjectId.Null);
                     if (segs.Count == 2 && segs[1].Name == "device") return ResolveDevice(segs[1], path);
@@ -897,7 +941,7 @@ namespace AcadClr.Plugin.Engine
             }
             throw new CliError("invalid_path", $"无法识别的路径：{path}",
                 "可用：/  /model  /model/<type>[N]  /entity[@handle=H]  /layers  /layer[@name=N]  /xrefs  /xref[@name=N]  " +
-                "/layouts  /layout[@name=N]  /layout[@name=N]/<type>[N]  /blocks  /block[@name=N]  /linetypes  /linetype[@name=N]  /devices  /device[@name=N]");
+                "/layouts  /layout[@name=N]  /layout[@name=N]/<type>[N]  /blocks  /block[@name=N]  /linetypes  /linetype[@name=N]  /sysvars  /sysvar[@name=N]  /devices  /device[@name=N]");
         }
 
         /// <summary>/layout[@name=X] 或 /layout[@name=X]/&lt;type&gt;[N|@handle=H]。</summary>
@@ -1003,6 +1047,16 @@ namespace AcadClr.Plugin.Engine
                 throw new CliError("invalid_path", $"句柄 “{hex}” 不是十六进制数。");
             try { return _db.GetObjectId(false, new Handle(v), 0); }
             catch (AcRx.Exception) { return ObjectId.Null; }
+        }
+
+        private Target ResolveSysvar(PathSegment seg, string whole)
+        {
+            if (seg.AttrName != "name" || string.IsNullOrWhiteSpace(seg.AttrValue))
+                throw new CliError("invalid_path", $"系统变量需要用 [@name=...] 定位：{whole}");
+            Sysvars.RequireActive(_db);
+            var name = seg.AttrValue!.Trim().ToUpperInvariant();
+            Sysvars.Read(name); // 不存在时报错
+            return new Target(TargetKind.Sysvar, ObjectId.Null, name);
         }
 
         private ObjectId ResolveBlock(PathSegment seg, string whole) =>

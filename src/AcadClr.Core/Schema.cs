@@ -361,12 +361,27 @@ namespace AcadClr.Core
             {
                 P("file", "string", Verbs.Get, "文件路径"),
                 P("version", "string", Verbs.Get, "DWG 版本"),
-                P("units", "units", Verbs.Get | Verbs.Set, "图形单位 INSUNITS：mm cm m in ft unitless", "units=mm"),
+                P("units", "units", Verbs.Get | Verbs.Set, "图形单位 INSUNITS：mm cm m in ft unitless。只影响插入图块 / 外部参照时的缩放和 measure convert 的缺省单位，不缩放已有几何", "units=mm"),
+                P("measurement", "string", Verbs.Get | Verbs.Set, "MEASUREMENT：metric（公制）或 imperial（英制），决定填充图案与线型文件的缺省选择", "measurement=metric"),
+                P("lunits", "number", Verbs.Get | Verbs.Set, "LUNITS 长度显示格式：1 科学 2 小数 3 工程 4 建筑 5 分数", "lunits=2"),
+                P("luprec", "number", Verbs.Get | Verbs.Set, "LUPREC 长度显示的小数位 0-8", "luprec=0"),
+                P("aunits", "number", Verbs.Get | Verbs.Set, "AUNITS 角度显示格式：0 十进制度 1 度分秒 2 百分度 3 弧度 4 勘测", "aunits=0"),
+                P("auprec", "number", Verbs.Get | Verbs.Set, "AUPREC 角度显示的小数位 0-8", "auprec=0"),
+                P("ltscale", "number", Verbs.Get | Verbs.Set, "LTSCALE 全局线型比例：大比例图上点划线看不出间隔时调大（1:100 常设 100）", "ltscale=100"),
+                P("dimscale", "number", Verbs.Get | Verbs.Set, "DIMSCALE 当前标注样式的全局比例", "dimscale=100"),
                 P("currentLayer", "string", Verbs.Get | Verbs.Set, "当前图层", "currentLayer=WALL"),
                 P("currentLayout", "string", Verbs.Get, "当前布局（切换用 set \"/layout[@name=...]\" --prop current=true）"),
                 P("layers", "number", Verbs.Get, "图层数"),
                 P("entities", "number", Verbs.Get, "模型空间实体数"),
-            }, "acadclr get /", "acadclr set / --prop units=mm"),
+            }, "acadclr get /", "acadclr set / --prop units=mm --prop ltscale=100"),
+
+            new TypeDef("sysvar", "/sysvars", "系统变量（GETVAR / SETVAR）。get /sysvars 列出常用变量，任意变量用 /sysvar[@name=X]", false, new[]
+            {
+                P("name", "string", Verbs.Get, "变量名（大写）"),
+                P("value", "string", Verbs.Get | Verbs.Set, "值：整数、实数、字符串或点 x,y[,z]，按变量当前类型转换", "value=100"),
+                P("valueType", "string", Verbs.Get, "integer / real / string / point"),
+            }, "acadclr get \"/sysvar[@name=PDMODE]\"", "acadclr set \"/sysvar[@name=PDMODE]\" --prop value=3",
+               "acadclr query \"sysvar[name~=DIM]\"          # 只在常用变量里查"),
         };
 
         // ---------------- edit 动作 ----------------
@@ -568,7 +583,7 @@ namespace AcadClr.Core
         public static TypeDef GenericEntity(string dxfType) =>
             new TypeDef(dxfType, "/model", "其他实体（仅支持公共属性）", true, CommonEntityProps);
 
-        public static IEnumerable<string> AddableTypes => Types.Where(t => t.Name != "document" && t.Name != "device").Select(t => t.Name);
+        public static IEnumerable<string> AddableTypes => Types.Where(t => t.Name != "document" && t.Name != "device" && t.Name != "sysvar").Select(t => t.Name);
 
         // ---------------- plot ----------------
 
@@ -702,7 +717,7 @@ namespace AcadClr.Core
             sb.AppendLine("路径：/  /model  /model/line[1]  /model/entity[@handle=2A3]  /entity[@handle=2A3]");
             sb.AppendLine("      /layers  /layer[@name=WALL]  /xrefs  /xref[@name=BASE]  /devices  /device[@name=...]");
             sb.AppendLine("      /layouts  /layout[@name=A3]  /layout[@name=A3]/viewport[1]  （图纸空间实体的父路径是布局）");
-            sb.AppendLine("      /blocks  /block[@name=TREE]  /linetypes  /linetype[@name=CENTER]");
+            sb.AppendLine("      /blocks  /block[@name=TREE]  /linetypes  /linetype[@name=CENTER]  /sysvars  /sysvar[@name=LTSCALE]");
             sb.AppendLine("      （索引从 1 开始，[last()] 取最后一个）");
             sb.AppendLine();
             sb.AppendLine("类型：" + string.Join("  ", Types.Select(t => t.Name)));

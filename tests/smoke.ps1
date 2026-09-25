@@ -100,6 +100,15 @@ Step "图块 改属性"        @("set", $n4, "insert[name=ROOMTAG]", "--prop", "
 Step "图块 删除被参照的块" @("remove", $n4, "/block[@name=树]")
 Step "图块 列表"          @("get", $n4, "/blocks")
 
+# 单位与系统变量：文档属性走后台数据库；系统变量离线时自动改走文档模式（accoreconsole /i）
+$n5 = Join-Path $out "系统变量.dwg"
+Step "系统 新建"          @("create", $n5)
+Step "系统 单位与线型比例" @("set", $n5, "/", "--prop", "ltscale=100", "--prop", "luprec=2")
+Step "系统 设系统变量"    @("set", $n5, "/sysvar[@name=PDMODE]", "--prop", "value=3")
+Step "系统 读回"          @("get", $n5, "/sysvar[@name=PDMODE]")
+Step "系统 查询"          @("query", $n5, "sysvar[name~=DIM]")
+Step "系统 换算"          @("measure", $n5, "convert", "--prop", "value=2400", "--prop", "to=m")
+
 Step "第2批 新建"          @("create", $n2)
 Step "第2批 布局与视口"    @("batch", "--dwg", $n2, "--input", (Join-Path $PSScriptRoot "layouts.json"))
 Step "第2批 布局列表"      @("get", $n2, "/layouts")

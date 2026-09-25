@@ -72,6 +72,13 @@ acadclr batch --dwg plan.dwg --input plan.json   # 离线模式，自动写回�
   点划线在大比例图上看不出间隔时，调 LTSCALE。
 - 被参照的块、被使用的线型不能 `remove`，错误信息会告诉你怎么找到使用者。
 
+## 单位与系统变量
+
+- `get /` 看 `units`（INSUNITS）、`ltscale`、`dimscale`、`lunits` / `luprec` 等；用 `set / --prop ltscale=100` 修改。
+  改 units 不会缩放已有几何，只影响插入图块 / 外部参照的缩放。
+- 其他系统变量：`get "/sysvar[@name=PDMODE]"`、`set "/sysvar[@name=PDMODE]" --prop value=3`；`get /sysvars` 列出常用变量。
+  离线模式读写系统变量要用 accoreconsole 打开图纸，比普通离线操作慢一些。
+
 ## 测量与校验（只读，可放进 batch）
 
 - `measure area|length <目标>`：面积 / 周长、长度，选择器命中多个时给出合计。`measure distance --prop from=x,y --prop to=x,y`；

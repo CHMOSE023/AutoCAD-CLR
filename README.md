@@ -122,6 +122,8 @@ acadclr stats plan.dwg
 /block[@name=TREE]         图块定义
 /linetypes                 线型表
 /linetype[@name=CENTER]    线型
+/sysvars                   常用系统变量
+/sysvar[@name=PDMODE]      任意系统变量（set 用 value=）
 ```
 
 选择器：`line[layer=WALL][length>=3000]`、`entity[color=1]`、`text[text~=客厅]`、`layer[frozen=true]`。

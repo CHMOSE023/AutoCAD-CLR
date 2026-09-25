@@ -89,8 +89,11 @@ namespace AcadClr.Cli
             req.Dwg = Path.GetFullPath(req.Dwg!);
             if (!req.Create && CheckOpenable(console, req.Dwg) is Response bad) return bad;
 
-            // 新建视口必须在真正的文档上执行（后台数据库里操作视口会让 accoreconsole 崩溃）
-            bool needDocument = req.Items.Any(i => i.Verb == "add" && string.Equals(i.Type?.Trim(), "viewport", StringComparison.OrdinalIgnoreCase));
+            // 新建视口必须在真正的文档上执行（后台数据库里操作视口会让 accoreconsole 崩溃）；
+            // 系统变量只能读写活动文档，后台数据库没有对应的文档
+            bool needDocument = req.Items.Any(i =>
+                i.Verb == "add" && string.Equals(i.Type?.Trim(), "viewport", StringComparison.OrdinalIgnoreCase) ||
+                (i.Path ?? i.Selector ?? "").IndexOf("sysvar", StringComparison.OrdinalIgnoreCase) >= 0);
             if (needDocument)
             {
                 if (req.Create)

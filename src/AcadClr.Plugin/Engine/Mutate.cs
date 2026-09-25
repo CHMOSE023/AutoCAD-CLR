@@ -413,22 +413,56 @@ namespace AcadClr.Plugin.Engine
 
         // ======================= 文档 =======================
 
-        public static void ApplyDocument(Database db, Transaction tr, List<KeyValuePair<string, string>> props)
+        /// <summary>
+        /// 修改文档级设置。返回恢复旧值的动作：数据库头变量是否随事务回滚没有文档保证，
+        /// 原子批处理整批放弃时由 Executor 显式恢复（已恢复的再写一次同样的值没有副作用）。
+        /// </summary>
+        public static List<Action> ApplyDocument(Database db, Transaction tr, List<KeyValuePair<string, string>> props)
         {
             var type = Schema.FindType("document")!;
+            var undo = new List<Action>();
+            int Range(string key, string v, int min, int max)
+            {
+                int n = Values.Int(key, v);
+                if (n < min || n > max) throw new CliError("invalid_value", $"{key} 应在 {min}-{max} 之间，收到 {n}。", "运行 acadclr help document");
+                return n;
+            }
             foreach (var kv in props)
             {
                 var key = Schema.CheckProp(type, kv.Key, Verbs.Set).Name;
-                if (key == "units") db.Insunits = Acad.Units(key, kv.Value);
-                else if (key == "currentLayer")
+                var v = kv.Value;
+                switch (key)
+                {
+                    case "units": { var old = db.Insunits; undo.Add(() => db.Insunits = old); db.Insunits = Acad.Units(key, v); continue; }
+                    case "measurement":
+                    {
+                        var old = db.Measurement;
+                        undo.Add(() => db.Measurement = old);
+                        var m = v.Trim().ToLowerInvariant();
+                        db.Measurement = m == "metric" ? MeasurementValue.Metric : m == "imperial" ? MeasurementValue.English
+                            : throw new CliError("invalid_value", $"measurement 只能是 metric 或 imperial，收到 “{v}”。");
+                        continue;
+                    }
+                    case "lunits": { var old = db.Lunits; undo.Add(() => db.Lunits = old); db.Lunits = Range(key, v, 1, 5); continue; }
+                    case "luprec": { var old = db.Luprec; undo.Add(() => db.Luprec = old); db.Luprec = Range(key, v, 0, 8); continue; }
+                    case "aunits": { var old = db.Aunits; undo.Add(() => db.Aunits = old); db.Aunits = Range(key, v, 0, 4); continue; }
+                    case "auprec": { var old = db.Auprec; undo.Add(() => db.Auprec = old); db.Auprec = Range(key, v, 0, 8); continue; }
+                    case "ltscale": { var old = db.Ltscale; undo.Add(() => db.Ltscale = old); db.Ltscale = Values.Positive(key, v); continue; }
+                    case "dimscale": { var old = db.Dimscale; undo.Add(() => db.Dimscale = old); db.Dimscale = Values.Positive(key, v); continue; }
+                }
+                if (key == "currentLayer")
                 {
                     var id = Acad.FindLayer(db, tr, kv.Value);
                     if (id.IsNull) throw new CliError("not_found", $"图层 “{kv.Value}” 不存在。", "先 add /layers --type layer --prop name=...");
                     var rec = (LayerTableRecord)tr.GetObject(id, OpenMode.ForRead);
                     if (rec.IsFrozen) throw new CliError("invalid_value", $"图层 “{kv.Value}” 已冻结，不能设为当前。");
+                    var old = db.Clayer;
+                    undo.Add(() => db.Clayer = old);
                     db.Clayer = id;
                 }
+                else throw new CliError("unsupported_property", $"document.{key} 不能 set。");
             }
+            return undo;
         }
     }
 }
