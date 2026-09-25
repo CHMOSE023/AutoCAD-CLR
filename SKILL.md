@@ -1,21 +1,24 @@
 ---
 name: acadclr
-description: 用 acadclr 命令行读写 AutoCAD 图纸（DWG）：画线、圆、多段线、文字，管理图层，查询与批量修改实体。用户提到 AutoCAD、DWG、CAD 绘图时使用。
+description: 用 acadclr（命令行或 MCP 工具）读写 AutoCAD 图纸（DWG）：绘图、标注、图块、图层，查询与批量修改，测量与空间校验，布局出图，截图核对。用户提到 AutoCAD、DWG、CAD 绘图时使用。
 ---
 
 # acadclr
 
-用来操作 AutoCAD 的命令行工具，有两种模式（通过 MCP 使用时，工具名就是下面的命令名，参数同名：
-位置参数写成 `path` / `parent` / `selector` / `action`，`--prop k=v` 写进 `props`，`--dwg` 写成 `dwg`）：
+操作 AutoCAD 的工具。命令行和 MCP 是同一套命令，下文用命令行写法；**通过 MCP 使用时，工具名就是命令名，参数同名**：
+位置参数写成 `path` / `parent` / `selector` / `action`，`--prop k=v` 写进 `props`，`--dwg` 写成 `dwg`，其他 `--xxx` 去掉前缀。
+例：`acadclr set "line[layer=A]" --prop color=1` ⇔ `set {"selector":"line[layer=A]","props":{"color":1}}`。
 
 - **实时模式**：操作用户正在打开的 AutoCAD。
-- **离线模式**：加 `--dwg <file>`，直接读写 DWG 文件，不需要打开 AutoCAD 界面。
+- **离线模式**：加 `--dwg <file>`（MCP 给 `dwg` 参数），直接读写 DWG 文件，不需要打开 AutoCAD 界面。
 
 ## 先查 help，不要猜属性名
 
 ```bash
 acadclr help              # 命令、路径语法、类型列表
 acadclr help polyline     # 某类型的全部属性、可用操作、示例
+acadclr help edit trim    # 某个动作的参数
+acadclr help set          # 某个命令的参数（命令行写法与 MCP 参数名对照）
 ```
 
 ## 工作流程
@@ -24,8 +27,10 @@ acadclr help polyline     # 某类型的全部属性、可用操作、示例
 2. **看全貌**：运行 `acadclr stats`，了解实体数量、按类型和图层的分布、图形范围。
 3. **定位**：用 `query` 找目标，例如 `acadclr query "polyline[layer=WALL][closed=true]"`。
    结果里的路径都带句柄（`/model/polyline[@handle=2A3]`），后续操作都用这个路径，删除或新增实体后它也不会漂移。
+   `set` / `remove` / `edit` / `measure` / `check` 的目标也可以直接写句柄，多个用 `;` 分隔（`2A3;2A4`）。
 4. **修改**：一两处修改用 `add` / `set` / `remove`；**三条以上用 `batch`**：只有一次往返，而且原子执行。
-5. **核对**：用 `get` 或 `query` 读回结果，重点检查 `bbox`、`length`、`area`，确认几何上是对的。
+5. **核对**：用 `get` 或 `query` 读回结果，重点检查 `bbox`、`length`、`area`；布局类的图再用 `check` 校验位置，
+   实时模式用 `view capture` 截图看一眼。
 
 ## 要点
 
@@ -120,7 +125,7 @@ acadclr batch --dwg plan.dwg --input plan.json   # 离线模式，自动写回�
 
 ## LISP 与脚本（逃生舱）
 
-结构化命令覆盖不到的功能（标注、填充、布局出图、系统变量……），用 LISP：
+标注、填充、图块、布局出图、系统变量都有结构化命令，先查 help。确实覆盖不到的，才用 LISP：
 
 ```bash
 acadclr lisp "(getvar \"LTSCALE\")"                            # 实时，同步返回值
@@ -137,5 +142,6 @@ acadclr script fix.scr "D:/drawings/*.dwg" --save              # 离线，批量
 - 加 `--json` 可以得到结构化输出。出错时读 `error.code` 和 `error.suggestion` 自行修正。
 - 常见错误码：`not_found`、`invalid_value`、`unsupported_property`、`missing_property`、`locked_layer`、`unscoped_selector`、`too_many`。
 - `read_only`：用户在 AutoCAD 里开了只读模式（或 MCP 以只读启动）。不要尝试绕过，告诉用户需要修改、请他执行 ACADCLR_READONLY；查询照常可用。
-- `lisp_disabled`：LISP / 脚本被禁用。改用结构化命令（多数需求都有），确实需要时请用户执行 ACADCLR_LISP。
+- `lisp_disabled`：LISP / 脚本被禁用（AutoCAD 里的开关，或 MCP 没带 `--allow-lisp`；MCP 下 lisp / script 工具默认不出现）。
+  改用结构化命令，确实需要时请用户开启。
 - 结果里出现 `backup` 时，插件已在修改前备份了原文件；出了问题可以告诉用户备份位置。`acadclr log` 能看到最近做过什么。

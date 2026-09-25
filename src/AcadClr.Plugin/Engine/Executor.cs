@@ -677,9 +677,7 @@ namespace AcadClr.Plugin.Engine
         private List<ObjectId> TargetEntities(string text, List<ItemResult> prior, bool force, ItemResult r)
         {
             text = text.Trim();
-            if (text.Contains(";")) return Factory.SplitRefs(text).Select(s => EntityRef(s, prior)).ToList();
-            if (text.StartsWith("$", StringComparison.Ordinal) || PathParser.IsPath(text) || IsHandle(text))
-                return new List<ObjectId> { EntityRef(text, prior) };
+            if (Commands.IsRefList(text)) return Factory.SplitRefs(text).Select(s => EntityRef(s, prior)).Distinct().ToList();
 
             var sel = Selector.Parse(text);
             if (sel.Conditions.Count == 0 && !force)
@@ -807,8 +805,15 @@ namespace AcadClr.Plugin.Engine
         private List<Target> Targets(BatchItem item, List<ItemResult> prior, string verb, ItemResult r)
         {
             var text = item.Path ?? item.Selector ?? throw new CliError("invalid_request", $"{verb} 缺少目标路径或选择器。");
-            if (text.StartsWith("$", StringComparison.Ordinal) || PathParser.IsPath(text))
+            if (text.StartsWith("$", StringComparison.Ordinal) || PathParser.IsPath(text) && !text.Contains(";"))
                 return new List<Target> { Resolve(Ref(text, prior, "path")) };
+            if (Commands.IsRefList(text))
+            {
+                // 裸句柄或 ; 分隔的多个路径 / 句柄 / $N（与 edit 的目标写法一致）
+                var ids = Factory.SplitRefs(text).Select(s => EntityRef(s, prior)).Distinct().ToList();
+                if (ids.Count > 1) r.Matched = ids.Count;
+                return ids.Select(id => new Target(TargetKind.Entity, id)).ToList();
+            }
 
             var sel = Selector.Parse(text);
             if (sel.Conditions.Count == 0 && item.Force != true)

@@ -64,10 +64,13 @@ namespace AcadClr.Tests
             new object[] { new[] { "set", "/entity[@handle=2A]", "--prop", "color=1" }, "{\"path\":\"/entity[@handle=2A]\",\"props\":{\"color\":\"1\"}}" },
             new object[] { new[] { "set", "circle[layer=WALL]", "--prop", "radius=600", "--force" }, "{\"selector\":\"circle[layer=WALL]\",\"props\":{\"radius\":\"600\"},\"force\":true}" },
             new object[] { new[] { "remove", "line[layer=TMP]" }, "{\"selector\":\"line[layer=TMP]\"}" },
+            new object[] { new[] { "set", "8A", "--prop", "color=1" }, "{\"path\":\"8A\",\"props\":{\"color\":\"1\"}}" },
+            new object[] { new[] { "remove", "8A;8B;$0" }, "{\"path\":\"8A;8B;$0\"}" },
+            new object[] { new[] { "set", "polyline[points=0,0;1,1]", "--prop", "color=1" }, "{\"selector\":\"polyline[points=0,0;1,1]\",\"props\":{\"color\":\"1\"}}" },
             new object[] { new[] { "edit", "offset", "8A", "--prop", "distance=240" }, "{\"action\":\"offset\",\"path\":\"8A\",\"props\":{\"distance\":\"240\"}}" },
             new object[] { new[] { "edit", "mirror", "polyline[layer=WALL]", "--prop", "axis=0,0;0,1" }, "{\"action\":\"mirror\",\"selector\":\"polyline[layer=WALL]\",\"props\":{\"axis\":\"0,0;0,1\"}}" },
             new object[] { new[] { "edit", "a.dwg", "trim", "8D@13500,2000", "--prop", "edges=8B" },
-                "{\"dwg\":\"a.dwg\",\"action\":\"trim\",\"selector\":\"8D@13500,2000\",\"props\":{\"edges\":\"8B\"}}" },
+                "{\"dwg\":\"a.dwg\",\"action\":\"trim\",\"path\":\"8D@13500,2000\",\"props\":{\"edges\":\"8B\"}}" },
             new object[] { new[] { "measure", "area", "polyline[layer=ROOM]" }, "{\"action\":\"area\",\"selector\":\"polyline[layer=ROOM]\"}" },
             new object[] { new[] { "measure", "distance", "--prop", "from=0,0", "--prop", "to=3,4" }, "{\"action\":\"distance\",\"props\":{\"from\":\"0,0\",\"to\":\"3,4\"}}" },
             new object[] { new[] { "check", "a.dwg", "adjacent", "8A", "--prop", "with=8B" }, "{\"dwg\":\"a.dwg\",\"action\":\"adjacent\",\"path\":\"8A\",\"props\":{\"with\":\"8B\"}}" },
@@ -321,6 +324,21 @@ namespace AcadClr.Tests
             var err = Assert.IsType<CliError>(Record.Exception(() => Match(selector, "0,0;1,1")));
             Assert.Contains(expected, err.Message);
         }
+    }
+
+    public class RefListTests
+    {
+        [Theory]
+        [InlineData("8A", true)]
+        [InlineData("8A;8B", true)]
+        [InlineData("8D@13500,2000", true)]
+        [InlineData("8D@1,2;95@3,4", true)]
+        [InlineData("/entity[@handle=8A];$0", true)]
+        [InlineData("$3", true)]
+        [InlineData("line[layer=WALL]", false)]
+        [InlineData("polyline[points=0,0;1,1]", false)]   // 选择器条件里的分号
+        [InlineData("line", false)]
+        public void 判断实体引用列表(string target, bool expected) => Assert.Equal(expected, Commands.IsRefList(target));
     }
 
     /// <summary>命令行特有的解析规则。</summary>

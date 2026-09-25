@@ -32,29 +32,44 @@ namespace AcadClr.Cli.Mcp
             _token = string.IsNullOrWhiteSpace(token) ? null : token!.Trim();
         }
 
+        /// <summary>实际监听的端口（构造时给 0 则由系统分配，测试用）。</summary>
+        public int Port => ((IPEndPoint)_listener!.LocalEndpoint).Port;
+
+        /// <summary>命令行入口：开始监听并阻塞到 Ctrl+C。</summary>
         public int Run()
         {
-            _listener = new TcpListener(IPAddress.Loopback, _port);
-            try { _listener.Start(); }
+            try { Start(); }
             catch (SocketException ex)
             {
                 Console.Error.WriteLine($"错误：无法监听 127.0.0.1:{_port}（{ex.SocketErrorCode}），端口可能已被占用。");
                 Console.Error.WriteLine("建议：用 --port 换一个端口；旧的 AutoCadMCP 插件默认占用 7130");
                 return 2;
             }
-            Console.Error.WriteLine($"[acadclr mcp] 已在 http://127.0.0.1:{_port}/mcp 监听（协议 {McpServer.Modern}，兼容 {string.Join(" / ", McpServer.Legacy)}）" +
+            Console.Error.WriteLine($"[acadclr mcp] 已在 http://127.0.0.1:{Port}/mcp 监听（协议 {McpServer.Modern}，兼容 {string.Join(" / ", McpServer.Legacy)}）" +
                                     (_token != null ? "，需要 Bearer token" : "") + "。Ctrl+C 退出");
-            Console.CancelKeyPress += (s, e) => { e.Cancel = true; _listener.Stop(); };
-
-            while (true)
-            {
-                TcpClient client;
-                try { client = _listener.AcceptTcpClient(); }
-                catch (SocketException) { break; }        // Stop() 之后
-                catch (ObjectDisposedException) { break; }
-                Task.Run(() => Serve(client));
-            }
+            var done = new ManualResetEventSlim(false);
+            Console.CancelKeyPress += (s, e) => { e.Cancel = true; Stop(); done.Set(); };
+            done.Wait();
             return 0;
+        }
+
+        /// <summary>开始监听并在后台接受连接；端口被占用时抛 SocketException。</summary>
+        public void Start()
+        {
+            _listener = new TcpListener(IPAddress.Loopback, _port);
+            _listener.Start();
+            var listener = _listener;
+            Task.Run(() =>
+            {
+                while (true)
+                {
+                    TcpClient client;
+                    try { client = listener.AcceptTcpClient(); }
+                    catch (SocketException) { break; }        // Stop() 之后
+                    catch (ObjectDisposedException) { break; }
+                    Task.Run(() => Serve(client));
+                }
+            });
         }
 
         public void Stop() => _listener?.Stop();

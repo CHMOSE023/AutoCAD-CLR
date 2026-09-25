@@ -12,6 +12,9 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" PrivateAssets="all" />
   </ItemGroup>
   <ItemGroup>
+    <Reference Include="System.Net.Http" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\..\src\AcadClr.Core\AcadClr.Core.csproj" />
     <ProjectReference Include="..\..\src\AcadClr.Cli\AcadClr.Cli.csproj" />
   </ItemGroup>

@@ -115,13 +115,22 @@ namespace AcadClr.Core
         private static ArgDef Force(string desc) => A("force", ArgKind.Boolean, desc, option: "--force");
         private static ArgDef Limit() => A("limit", ArgKind.Integer, "最多返回多少个元素（默认 200）", option: "--limit");
 
-        /// <summary>set / remove 的目标：/ 开头或 $N 是路径，否则是选择器。</summary>
-        public static string RoutePathOrSelector(string target) =>
-            target.StartsWith("/", StringComparison.Ordinal) || target.StartsWith("$", StringComparison.Ordinal) ? "path" : "selector";
+        /// <summary>
+        /// 目标是否为实体引用：路径（/ 开头）、$N、裸句柄（可带 @x,y 拾取点），多个用 ; 分隔。
+        /// 否则按选择器处理（选择器条件里也可能有 ;，如 polyline[points=0,0;…]，所以要逐段判断）。
+        /// </summary>
+        public static bool IsRefList(string target)
+        {
+            var parts = target.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries).Select(p => p.Trim()).ToList();
+            return parts.Count > 0 && parts.All(p =>
+                p.StartsWith("/", StringComparison.Ordinal) || p.StartsWith("$", StringComparison.Ordinal) ||
+                IsHandle(p.Split('@')[0]));
+        }
 
-        /// <summary>edit 的目标还可以是 ; 分隔的句柄列表或裸句柄。命令式动作的 句柄@x,y 两种归属都能处理。</summary>
-        public static string RouteEditTarget(string target) =>
-            RoutePathOrSelector(target) == "path" || target.Contains(";") || target.All(Uri.IsHexDigit) ? "path" : "selector";
+        private static bool IsHandle(string s) => s.Length > 0 && s.All(Uri.IsHexDigit);
+
+        /// <summary>命令行位置参数：实体引用落到 path，其余落到 selector。</summary>
+        public static string RouteTarget(string target) => IsRefList(target) ? "path" : "selector";
 
         private static ArgDef Target(string desc, int pos, Func<string, string> route) =>
             new ArgDef("path", ArgKind.String, desc) { Position = pos, Route = route };
@@ -152,21 +161,21 @@ namespace AcadClr.Core
 
             new CommandDef("set", "set <path|selector>", "修改属性（含 move / rotate / scale）", CommandModes.Both, true,
                 Doc(),
-                Target("目标路径", 0, RoutePathOrSelector),
+                Target("目标：路径、句柄或 $N，多个用 ; 分隔", 0, RouteTarget),
                 SelectorArg("目标选择器（必须带条件）"),
                 Props(),
                 Force("选择器不带条件时也执行")) { Batchable = true },
 
             new CommandDef("remove", "remove <path|selector>", "删除（一次超过 30 个需 --force）", CommandModes.Both, true,
                 Doc(),
-                Target("目标路径", 0, RoutePathOrSelector),
+                Target("目标：路径、句柄或 $N，多个用 ; 分隔", 0, RouteTarget),
                 SelectorArg("目标选择器（必须带条件）"),
                 Force("允许一次删除超过 30 个元素")) { Batchable = true },
 
             new CommandDef("edit", "edit <动作> <目标>", "偏移 镜像 分解 打断 合并 阵列 修剪 延伸 倒圆角 倒角", CommandModes.Both, true,
                 Doc(),
                 A("action", ArgKind.String, "动作：offset mirror explode break join array trim extend fillet chamfer", pos: 0, required: true),
-                Target("目标：路径、句柄、句柄@拾取点，多个用 ; 分隔", 1, RouteEditTarget),
+                Target("目标：路径、句柄、句柄@拾取点，多个用 ; 分隔", 1, RouteTarget),
                 SelectorArg("目标选择器"),
                 Props("动作参数（help edit <动作> 查看）"),
                 Force("选择器命中过多时也执行")) { Batchable = true },
@@ -174,20 +183,20 @@ namespace AcadClr.Core
             new CommandDef("measure", "measure <动作> [目标]", "测量：距离 面积 长度 单位换算", CommandModes.Both, false,
                 Doc(),
                 A("action", ArgKind.String, "动作：distance area length convert", pos: 0, required: true),
-                Target("目标：路径、句柄，多个用 ; 分隔（distance、convert 不需要）", 1, RouteEditTarget),
+                Target("目标：路径、句柄，多个用 ; 分隔（distance、convert 不需要）", 1, RouteTarget),
                 SelectorArg("目标选择器"),
                 Props("动作参数（help measure <动作> 查看）")) { Batchable = true },
 
             new CommandDef("check", "check <动作> <目标>", "空间校验：重叠 越界 相邻（按包围盒）", CommandModes.Both, false,
                 Doc(),
                 A("action", ArgKind.String, "动作：overlap inside adjacent", pos: 0, required: true),
-                Target("目标：路径、句柄，多个用 ; 分隔", 1, RouteEditTarget),
+                Target("目标：路径、句柄，多个用 ; 分隔", 1, RouteTarget),
                 SelectorArg("目标选择器"),
                 Props("动作参数（help check <动作> 查看）")) { Batchable = true },
 
             new CommandDef("view", "view <动作> [目标]", "视图：zoom 缩放、capture 截图（实时模式）", CommandModes.Live, false,
                 A("action", ArgKind.String, "动作：zoom capture", pos: 0, required: true),
-                Target("可选：缩放到这些实体（路径、句柄，多个用 ; 分隔）", 1, RouteEditTarget),
+                Target("可选：缩放到这些实体（路径、句柄，多个用 ; 分隔）", 1, RouteTarget),
                 SelectorArg("可选：缩放到选择器匹配的实体"),
                 Props("动作参数（help view <动作> 查看）")),
 

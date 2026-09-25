@@ -204,6 +204,14 @@ namespace AcadClr.Plugin.Host
             if (Modified(doc) != false && !force)
                 throw new CliError("unsaved_changes", $"{FileName(doc)} 有未保存的修改（或无法确认是否已保存）。",
                     $"先 acadclr save --doc {FileName(doc)} 保存；确认丢弃修改则加 --force");
+
+            // 关的是当前文档时，先切到另一个文档再关，保证任何时刻都有当前文档。
+            // 本方法在 Application.Idle 回调里执行；直接关掉当前文档后，到 AutoCAD 激活下一个文档之前没有当前文档，
+            // 同一轮 Idle 里排在后面的 AutoCAD 自己的 CommandEditor.SyncUpAllCommandLineState 会抛 NullReferenceException，
+            // 弹出“未经处理的异常”窗口（实测间歇出现，取决于 Idle 回调的先后顺序）。
+            var dm = CoreApp.DocumentManager;
+            if (ReferenceEquals(dm.MdiActiveDocument, doc))
+                dm.MdiActiveDocument = All().First(d => !ReferenceEquals(d, doc));
             doc.CloseAndDiscard();
             return path;
         }

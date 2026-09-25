@@ -8,6 +8,7 @@ $exe  = Join-Path $root "bin\Release\acadclr.exe"
 $out  = Join-Path $root "test-out"
 $log  = Join-Path $out "live.log"
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+. (Join-Path $PSScriptRoot "acad-dialog.ps1")
 New-Item -ItemType Directory $out -Force | Out-Null
 Set-Content $log "AutoCADCLR live test  $(Get-Date -Format s)" -Encoding UTF8
 $script:fail = 0
@@ -22,6 +23,11 @@ function Run([string[]]$argv) {
 function Json([string[]]$argv) { (& $exe @argv --json 2>$null | Out-String) | ConvertFrom-Json }
 
 function Check([string]$title, [bool]$ok) {
+    # AutoCAD 弹出“未经处理的异常”窗口时主线程停住，后面的步骤都会超时：立即报出并结束
+    if ($script:acadPid -and ($dlg = Find-AcadErrorDialog $script:acadPid)) {
+        Write-Host "FAIL  $title：AutoCAD 弹出错误窗口" -ForegroundColor Red
+        Write-Host (Format-AcadErrorDialog $dlg); exit 1
+    }
     if ($ok) { Write-Host "PASS  $title" } else { Write-Host "FAIL  $title" -ForegroundColor Red; $script:fail++ }
     Add-Content $log ("=== " + ($(if ($ok) { "PASS" } else { "FAIL" })) + "  $title`r`n") -Encoding UTF8
 }
@@ -30,6 +36,7 @@ function Count([string]$selector) { (Json @("query", $selector)).items[0].matche
 
 $st = Json @("status")
 if (-not $st.ok) { Write-Host "连不上 AutoCAD：先 NETLOAD 插件，再运行本脚本。"; exit 2 }
+$script:acadPid = [int]$st.data.pid
 $before = (Json @("get", "/documents")).items[0].node.children.Count
 
 # 新建临时图纸，后面的操作都在它上面
