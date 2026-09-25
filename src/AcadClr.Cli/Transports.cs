@@ -36,6 +36,19 @@ namespace AcadClr.Cli
             catch (ArgumentException) { return false; }
         }
 
+        private static readonly System.Threading.AsyncLocal<System.Threading.CancellationToken> CancelSlot =
+            new System.Threading.AsyncLocal<System.Threading.CancellationToken>();
+
+        /// <summary>
+        /// 当前调用的取消信号（acadclr mcp：HTTP 客户端断开、stdio 收到 notifications/cancelled）。
+        /// 取消时关闭管道，插件感知到断开后跳过尚未开始的工作、不再回写结果。
+        /// </summary>
+        public static System.Threading.CancellationToken Cancel
+        {
+            get => CancelSlot.Value;
+            set => CancelSlot.Value = value;
+        }
+
         public static Response Send(Request req, int? pid)
         {
             var all = Instances();
@@ -45,12 +58,13 @@ namespace AcadClr.Cli
                 return Response.Fail("not_connected",
                     pid.HasValue ? $"没有找到进程号为 {pid} 的 AutoCAD 实例。" : "没有找到加载了 AutoCADCLR 插件的 AutoCAD。",
                     "在 AutoCAD 命令行执行 NETLOAD 加载 " + Path.Combine(AppDir, "AcadClr.Plugin.dll") +
-                    "；或用 --dwg <文件> 走离线模式");
+                    "；或给 dwg 参数（命令行 --dwg <文件>）离线读写 DWG");
             }
 
             try
             {
                 using (var client = new NamedPipeClientStream(".", inst.Pipe, PipeDirection.InOut))
+                using (Cancel.Register(() => { try { client.Dispose(); } catch (Exception) { } }))
                 {
                     client.Connect(5000);
                     LineIo.WriteLine(client, Json.Serialize(req));
@@ -62,6 +76,10 @@ namespace AcadClr.Cli
             catch (TimeoutException)
             {
                 return Response.Fail("not_connected", $"连接 AutoCAD（进程 {inst.Pid}）超时。", "AutoCAD 可能正忙，稍后重试");
+            }
+            catch (Exception ex) when (Cancel.IsCancellationRequested && (ex is IOException || ex is ObjectDisposedException || ex is InvalidOperationException))
+            {
+                throw new OperationCanceledException(Cancel);
             }
             catch (IOException ex)
             {

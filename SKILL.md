@@ -5,7 +5,8 @@ description: 用 acadclr 命令行读写 AutoCAD 图纸（DWG）：画线、圆�
 
 # acadclr
 
-用来操作 AutoCAD 的命令行工具，有两种模式：
+用来操作 AutoCAD 的命令行工具，有两种模式（通过 MCP 使用时，工具名就是下面的命令名，参数同名：
+位置参数写成 `path` / `parent` / `selector` / `action`，`--prop k=v` 写进 `props`，`--dwg` 写成 `dwg`）：
 
 - **实时模式**：操作用户正在打开的 AutoCAD。
 - **离线模式**：加 `--dwg <file>`，直接读写 DWG 文件，不需要打开 AutoCAD 界面。

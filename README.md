@@ -23,8 +23,8 @@ AcadClr.Core.dll：协议、路径 / 选择器解析、属性 schema、help —�
 |---|---|
 | `src/AcadClr.Core` | `Protocol.cs` 请求 / 响应，`PathSyntax.cs` 路径与选择器，`Schema.cs` 类型与属性定义（help 与校验的唯一来源），`Commands.cs` 命令与参数定义（命令行解析、help 的唯一来源），`Values.cs` 值解析 |
 | `src/AcadClr.Plugin` | `Engine/Executor.cs` 执行批处理（外层事务 + 每条一个嵌套事务），`Engine/Mutate.cs` 增改，`Engine/Nodes.cs` 读取，`Host/` 管道服务、主线程调度、离线入口 |
-| `src/AcadClr.Cli` | `acadclr.exe`：`Program.cs` 命令行 → JSON 参数，`Dispatcher.cs` 参数 → 请求并选择实时 / 离线传输，`Output.cs` 文本与 JSON 输出 |
-| `tests` | `AcadClr.Tests` 单元测试（`dotnet test`，不需要 AutoCAD），`smoke.ps1` 离线冒烟测试，`live.ps1` 实时模式测试（需要已加载插件的 AutoCAD） |
+| `src/AcadClr.Cli` | `acadclr.exe`：`Program.cs` 命令行 → JSON 参数，`Dispatcher.cs` 参数 → 请求并选择实时 / 离线传输，`Output.cs` 文本与 JSON 输出，`Mcp/` MCP server（协议、工具目录、stdio / HTTP 传输） |
+| `tests` | `AcadClr.Tests` 单元测试（`dotnet test`，不需要 AutoCAD），`smoke.ps1` 离线冒烟测试，`live.ps1` 实时模式测试（需要已加载插件的 AutoCAD），`mcp.ps1` MCP 端到端测试（stdio / HTTP × 新旧协议） |
 
 ## 构建
 
@@ -95,6 +95,38 @@ acadclr stats plan.dwg
 - 每次调用都要启动一次 accoreconsole，大约需要 3–5 秒，所以大量操作应该合并成一次 `batch`。
 - `--acad 2020` 或 `--acad <accoreconsole.exe 路径>` 可以指定 AutoCAD 版本，也可以设置环境变量 `ACADCLR_ACCORE`。
 
+## MCP
+
+`acadclr mcp` 是 MCP server：**工具与命令一一对应，名字、参数都相同**（`acadclr help <命令>` 列出命令行写法与参数名的对照），
+所以 MCP 客户端与命令行用的是同一套说明、同一套校验和错误提示。实时模式与离线模式（`dwg` 参数）都可用。
+
+```json
+{
+  "mcpServers": {
+    "acadclr": { "type": "stdio", "command": "D:\\AutoCADCLR\\bin\\Release\\acadclr.exe", "args": ["mcp"] }
+  }
+}
+```
+
+HTTP（常驻，可供多个客户端共用）：先运行 `acadclr mcp --http`（或在 AutoCAD 里执行 `ACADCLR_MCP`），再配置
+
+```json
+{
+  "mcpServers": {
+    "acadclr": { "type": "http", "url": "http://127.0.0.1:7140/mcp" }
+  }
+}
+```
+
+- 协议：按 MCP **2026-07-28** 无状态规范实现（`server/discover`、每个请求自带 `_meta`、HTTP 校验 `MCP-Protocol-Version` / `Mcp-Method` / `Mcp-Name`），
+  同时兼容 **2025-11-25 / 2025-06-18 / 2025-03-26**（`initialize` 握手、`ping`）。逐请求判定，服务端不保存会话。
+- 选项：`--http [--port 7140]`（只监听 127.0.0.1，校验 Host / Origin）、`--token T`（HTTP 要求 `Authorization: Bearer T`，
+  也可用环境变量 `ACADCLR_MCP_TOKEN`）、`--read-only`（写操作工具不出现、调用也拒绝）、`--allow-lisp`（开放 `lisp` / `script`，**默认不开放**）、`--acad 2020`（离线用的 AutoCAD）。
+- 结果：`structuredContent` 是完整的 JSON 结果，`content` 是同一 JSON 的文本；参数写错、目标不存在等返回 `isError: true` 与修正建议；
+  `view capture` 的截图作为 image 内容块返回。
+- 多个 AutoCAD：一个 `acadclr mcp` 就够，工具参数 `pid` 选择实例（`instances` 工具列出）。
+- 调用都会记进操作日志（来源 `mcp-stdio` / `mcp-http`），`log` 工具或 `acadclr log` 查看。
+
 ## 命令
 
 | 命令 | 说明 |
@@ -117,6 +149,7 @@ acadclr stats plan.dwg
 | `create <file.dwg>` | 新建空白 DWG（离线，单位默认 mm） |
 | `instances` | 列出加载了插件的 AutoCAD 实例 |
 | `log [N]` | 查看操作日志的最后 N 行 |
+| `mcp [--http]` | 启动 MCP server（见上文“MCP”） |
 | `help [type\|命令] [--json]` | 查看类型的属性，或命令的参数（命令行写法与 JSON / MCP 参数名对照） |
 
 全局选项：`--json`、`--dwg`、`--acad`、`--pid`、`--doc`（实时模式下操作指定的已打开文档，不必先切换）、`--timeout`。其余选项属于各自的命令（`--best-effort`、`--stop-on-error` 只用于 `batch`，
@@ -278,6 +311,5 @@ acadclr add /model --type leader --prop points="0,0;500,500;1200,500" --prop tex
 
 进度见 [合并计划](docs/PLAN-merge-mcp.md)：
 
-- `acadclr mcp`：MCP server（stdio / Streamable HTTP），工具与命令一一对应，由命令表生成（步骤 4）
 - 从 AutoCadMCP 迁移：[对照表](docs/migrate-from-autocad-mcp.md)
 - `dump`：把现有图纸导出成可重放的 batch JSON

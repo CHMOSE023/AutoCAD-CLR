@@ -210,52 +210,60 @@ acadclr mcp --http [--port 7140]             # Streamable HTTP，常驻
             [--token T] [--read-only] [--allow-lisp] [--acad 2020]
 ```
 
-- [ ] stdio：一行一个 JSON-RPC 消息；stdout 只写协议消息，日志一律写 stderr
-- [ ] HTTP：只监听 `127.0.0.1`，端口默认 7140（旧插件占用 7130），被占用时报错并提示 `--port`（不自动换端口，避免客户端配置失效）
-- [ ] 避开 urlacl：用 `TcpListener` 自行处理 HTTP，或验证 `HttpListener` 的 `localhost` 前缀在非管理员下可用（二选一，先实测）
-- [ ] 校验 `Origin` 头，防 DNS rebinding
-- [ ] `POST /mcp`：一个请求一个响应，默认返回 `application/json`；长耗时操作（打印、离线批处理）可用 SSE 响应流推送 `notifications/progress`
-- [ ] `GET /mcp` 返回 405（旧规范允许；新规范已用 `subscriptions/listen` 取代）
-- [ ] 并发：同一实例 / 同一 DWG 的请求串行（插件主线程本来就串行，离线同一文件不能并发打开）；不同实例、不同文件可并行
-- [ ] 客户端断开（HTTP 连接关闭、stdio 取消通知）时取消对应的管道请求
+- [x] stdio：一行一个 JSON-RPC 消息，UTF-8；stdout 只写协议消息，日志写 stderr；请求并发处理，stdin 关闭后收尾退出
+- [x] HTTP：只监听 `127.0.0.1`，端口默认 7140（旧插件占用 7130），被占用时报错并提示 `--port`
+- [x] 避开 urlacl：实测本机 `HttpListener` 的两种前缀都能监听，但可能是本机已有 urlacl 配置，不可依赖；
+      **采用 `TcpListener`**（绑定回环地址不需要任何授权），自己处理 HTTP/1.1（Content-Length 与分块请求体），每个连接一个请求
+- [x] 校验 `Host`（必须是回环地址）与 `Origin`（带了就必须来自本机，否则 403），防 DNS rebinding；可选 Bearer token（401）
+- [x] `POST /mcp`：一个请求一个 `application/json` 响应；通知返回 202。**暂不做 SSE 进度推送**：结果一次返回，长耗时操作靠超时参数
+- [x] `GET` / `DELETE /mcp` 返回 405
+- [x] 并发：插件主线程串行；离线对同一 DWG 的调用在进程内加锁串行；不同实例、不同文件并行
+- [x] 客户端断开（HTTP 连接关闭、stdio `notifications/cancelled`）时关闭到插件的管道（插件感知断开后不再执行 / 回写）；
+      离线调用不中途终止 accoreconsole（避免写坏文件），只是结果不再回写
 
 ### 4.2 2026-07-28 无状态规范
 
-- [ ] 不需要握手：每个请求从 `_meta` 读取 `io.modelcontextprotocol/protocolVersion`、`clientCapabilities`、`clientInfo`
-- [ ] 实现 `server/discover`：返回支持的协议版本、能力、服务端信息
-- [ ] 每个结果带 `resultType: "complete"`，`_meta` 带 `io.modelcontextprotocol/serverInfo`
-- [ ] `tools/list`：顺序固定，带 `ttlMs` 与 `cacheScope: "private"`
-- [ ] HTTP 校验 `Mcp-Method` / `Mcp-Name` 请求头，不一致返回 `HeaderMismatch`（-32020）
-- [ ] 不支持的版本返回 `UnsupportedProtocolVersion`（-32022），附带支持的版本列表
-- [ ] 日志级别按请求 `_meta` 的 `io.modelcontextprotocol/logLevel`，未指定则不发 `notifications/message`
-- [ ] `subscriptions/listen`：暂不支持，`server/discover` 中不声明（工具列表是固定的）
+（实现前对照规范原文核对过：modelcontextprotocol.io/specification/2026-07-28）
+
+- [x] 不需要握手：每个请求从 `_meta` 读取 `io.modelcontextprotocol/protocolVersion`
+- [x] `server/discover`：`supportedVersions`、`capabilities`、`instructions`、`ttlMs` / `cacheScope`
+- [x] 每个结果带 `resultType: "complete"`，`_meta` 带 `io.modelcontextprotocol/serverInfo`
+- [x] `tools/list`：顺序与命令表一致，带 `ttlMs` 与 `cacheScope: "private"`
+- [x] HTTP 校验 `MCP-Protocol-Version`（规范要求，计划漏写）/ `Mcp-Method` / `Mcp-Name`（支持 `=?base64?…?=`），缺失或不一致返回 400 + `HeaderMismatch`（-32020）
+- [x] 不支持的版本返回 400 + `UnsupportedProtocolVersion`（-32022），`data` 带 `supported` 与 `requested`；方法不存在返回 404 + -32601
+- [x] 不发 `notifications/message`（规范：请求未带 logLevel 时不得发；本服务一律不发）
+- [x] `subscriptions/listen`：不支持、不声明（工具列表固定，`listChanged: false`）；新规范已删除 `ping`，只对旧协议保留
 
 ### 4.3 兼容旧协议（2025-11-25 / 2025-06-18 / 2025-03-26）
 
-- [ ] 判定方式：请求 `_meta` 中有协议版本按新规范处理，否则按旧规范处理；逐请求判定，不保存状态（stdio 与 HTTP 相同）
-- [ ] 响应 `initialize`：协商版本（返回客户端请求的版本，不支持时返回最新的旧版本），不下发 `Mcp-Session-Id`
-- [ ] 接受并忽略 `notifications/initialized`、`Mcp-Session-Id` 头
-- [ ] 保留 `ping`
-- [ ] 旧请求缺少 `Mcp-Method` / `Mcp-Name` 头时不报错
-- [ ] 新增的结果字段（`resultType`、`ttlMs` 等）对旧客户端也照常返回，属于兼容的附加字段
-- [ ] 错误码：旧客户端沿用原错误码
+- [x] 判定方式：请求 `_meta` 中有协议版本按新规范处理，否则按旧规范处理；逐请求判定，不保存状态（stdio 与 HTTP 相同）
+- [x] 响应 `initialize`：协商版本（返回客户端请求的版本，不支持时返回 2025-11-25），不下发 `Mcp-Session-Id`
+- [x] 接受并忽略 `notifications/initialized`、`Mcp-Session-Id` 头；`logging/setLevel` 接受但不发日志
+- [x] 旧协议保留 `ping`
+- [x] 旧请求缺少 `MCP-Protocol-Version` / `Mcp-Method` / `Mcp-Name` 头时不报错
+- [x] 新增的结果字段（`resultType`、`_meta.serverInfo`、`ttlMs` 等）对旧客户端也照常返回
+- [x] 错误码：旧客户端沿用 JSON-RPC 原错误码
 
 ### 4.4 工具目录由命令表生成
 
-- [ ] `Mcp/Tools.cs`：遍历 `Commands`（跳过 `config`、`mcp`）生成 `tools/list`；`inputSchema` 由参数定义生成，`props` / `items` 为开放对象，附带公共参数 `dwg` / `pid` / `doc` / `timeout`
-- [ ] 工具说明保持简短，统一提示“类型与属性用 `help` 工具查询”，对应 SKILL.md 的“先查 help，不要猜属性名”
-- [ ] `tools/call`：`arguments` 原样交给 2.1 的 `Dispatcher`；**Mcp 目录下没有按工具分支的代码**
-- [ ] 结果：`structuredContent` = `Response` JSON，`content` 为同一 JSON 的文本（兼容不读 structuredContent 的客户端）；
-      `view capture` 的图片放 `image` 内容块；`Response.ok=false` 时 `isError: true`
-- [ ] 连接失败（没有运行中的 AutoCAD）返回 `isError: true` + `not_connected`，与 CLI 相同的 `suggestion`（NETLOAD 插件或改用 `dwg` 参数）
-- [ ] 工具注解由命令表生成：只读命令 `readOnlyHint`，`remove` / `rollback` 等 `destructiveHint`
-- [ ] 测试：`tools/list` 与 `acadclr help --json` 的命令、参数一致；同一操作经 CLI 与 MCP 执行，`Response` 相同
+- [x] `Mcp/McpTools.cs`：遍历 `Commands`（跳过只属于命令行的 `config`、`mcp`）生成 `tools/list`；`inputSchema` 由参数定义生成
+      （`props` 为开放对象，`action` 带枚举，公共参数 `dwg` / `pid` / `doc` / `timeout` 随命令表），`additionalProperties: false`
+- [x] 工具说明简短：一句用途 + 等价命令行 + “props 用 help 查”；服务端 `instructions` 写明 help 优先、batch、选择器、离线用法
+- [x] `tools/call`：`arguments` 原样交给 `Dispatcher`；Mcp 目录下没有按工具分支的代码（help 的正文以文本给出是按结果形状判断的）
+- [x] 结果：`structuredContent` = `Response` JSON（去掉图片数据），`content` 为同一 JSON 的文本；截图放 `image` 内容块；
+      `ok=false` 时 `isError: true`；未知工具是协议错误 -32602
+- [x] 连接失败返回 `isError: true` + `not_connected`，建议里写明“给 dwg 参数离线读写”
+- [x] 工具注解由命令表生成：`readOnlyHint = !Writes`，`remove` / `rollback` / `undo` / `batch` 标 `destructiveHint`
+- [x] `ACADCLR_MCP`（步骤 3 留下的）：插件里拉起 / 停止 `acadclr mcp --http` 子进程，AutoCAD 退出时停止，输出写 `logs/mcp-http.log`
+- [x] 测试：`McpTests`（20 个：版本协商、请求头校验、错误码、工具目录与命令表逐项一致、策略过滤、stdio 收发）；
+      `tests/mcp.ps1` 端到端：stdio / HTTP × 旧 / 新协议四种组合，离线 36 项 + 实时 8 项全部通过
 
 验收：
-- Claude Code 分别以 stdio（`command: acadclr, args: [mcp]`）和 `type: http` 连接，全部工具可用；用 `batch` 工具一次完成 SKILL.md 中的示例
-- 用旧协议客户端（带 `initialize`）和新协议客户端（带 `_meta`）各跑一遍工具测试，都通过
-- 同时开两个 AutoCAD，一个 `acadclr mcp` 通过 `pid` 分别操作
-- 不开 AutoCAD，通过 `dwg` 参数离线读写一张图
+- [ ] Claude Code 分别以 stdio 和 `type: http` 连接：本机 `claude` 命令行未登录，项目级 MCP 配置也需要在交互界面里批准，
+      未能自动验证，待用户按 README 的 `.mcp.json` 实测。协议层已由 `tests/mcp.ps1` 的四种组合覆盖（含 batch 完成 SKILL 示例）
+- [x] 用旧协议客户端（带 `initialize`）和新协议客户端（带 `_meta`）各跑一遍工具测试，都通过
+- [x] 同时开两个 AutoCAD 2020，一个 `acadclr mcp` 通过 `pid` 分别写入、查询，互不干扰
+- [x] 不开 AutoCAD，通过 `dwg` 参数离线读写一张图
 
 ## 步骤 5：测试、迁移与收尾
 

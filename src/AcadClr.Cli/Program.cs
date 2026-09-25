@@ -38,6 +38,7 @@ namespace AcadClr.Cli
             var name = parsed.Command.Name;
 
             if (name == "config") return ConfigCmd(parsed.Args.GetList("args"));
+            if (name == "mcp") return Mcp(parsed.Args);
 
             // batch 没给 --input / --commands 时从标准输入读
             if (name == "batch" && parsed.Args["items"] == null && parsed.Args["input"] == null && Console.IsInputRedirected)
@@ -45,6 +46,25 @@ namespace AcadClr.Cli
 
             var call = Dispatcher.Prepare(name, parsed.Args);
             return Output.Render(call.Execute(), name, parsed.Json, call.Offline);
+        }
+
+        /// <summary>
+        /// acadclr mcp：MCP server。工具与命令一一对应，调用都交给 Dispatcher，与命令行共用参数、校验和日志。
+        /// MCP 默认不开放 lisp / script（--allow-lisp 开放）；--read-only 隐藏并拒绝写操作。
+        /// </summary>
+        private static int Mcp(JObject a)
+        {
+            var args = Commands.Normalize(Commands.Require("mcp"), a);
+            Dispatcher.ReadOnly = args.GetBool("readOnly");
+            Dispatcher.AllowLisp = args.GetBool("allowLisp");
+            if (!args.GetBool("http"))
+            {
+                Dispatcher.Source = "mcp-stdio";
+                return AcadClr.Cli.Mcp.StdioHost.Run();
+            }
+            Dispatcher.Source = "mcp-http";
+            var token = args.GetString("token") ?? Environment.GetEnvironmentVariable("ACADCLR_MCP_TOKEN");
+            return new AcadClr.Cli.Mcp.HttpHost(args.GetInt("port") ?? 7140, token).Run();
         }
 
         /// <summary>

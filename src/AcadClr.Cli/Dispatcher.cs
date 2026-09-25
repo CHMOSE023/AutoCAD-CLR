@@ -66,6 +66,14 @@ namespace AcadClr.Cli
             Enforce(cmd, a, call);
             if (cmd.Modes == CommandModes.None) return call;
 
+            // 离线：同一进程（acadclr mcp）里对同一个 DWG 的调用串行，accoreconsole 不能并发打开同一文件
+            if (call.Offline && call.Request?.Dwg is string file)
+            {
+                var gate = FileGate(file);
+                var inner = call.Execute;
+                call.Execute = () => { lock (gate) return inner(); };
+            }
+
             var run = call.Execute;
             call.Execute = () =>
             {
@@ -75,6 +83,19 @@ namespace AcadClr.Cli
                 return resp;
             };
             return call;
+        }
+
+        private static readonly Dictionary<string, object> Gates = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
+        private static object FileGate(string file)
+        {
+            string key;
+            try { key = Path.GetFullPath(file); } catch (Exception) { key = file; }
+            lock (Gates)
+            {
+                if (!Gates.TryGetValue(key, out var g)) Gates[key] = g = new object();
+                return g;
+            }
         }
 
         /// <summary>调用方策略：只读时拒绝写操作，不允许 LISP 时拒绝 lisp / script。被拒绝的调用也记日志。</summary>

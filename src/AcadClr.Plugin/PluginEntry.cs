@@ -33,7 +33,11 @@ namespace AcadClr.Plugin
             catch (Exception ex) { Print("启动失败：" + ex.Message + "。可执行 ACADCLR_START 重试。"); }
         }
 
-        public void Terminate() => StopServer();
+        public void Terminate()
+        {
+            McpProcess.Stop();
+            StopServer();
+        }
 
         [CommandMethod("ACADCLR_START")]
         public void Start()
@@ -56,7 +60,12 @@ namespace AcadClr.Plugin
             Print(_server != null ? "运行中，管道：" + _server.PipeName : "未运行（ACADCLR_START 启动）。");
             Print($"只读模式：{(Guard.ReadOnly ? "开" : "关")}（ACADCLR_READONLY 切换）；LISP / 脚本：{(Guard.AllowLisp ? "允许" : "禁止")}（ACADCLR_LISP 切换）");
             foreach (var b in Guard.BackupList()) Print("已备份：" + b);
+            Print("MCP（HTTP）：" + (McpProcess.Running ? "运行中 http://127.0.0.1:7140/mcp（ACADCLR_MCP 停止）" : "未启动（ACADCLR_MCP 启动）"));
         }
+
+        /// <summary>拉起 / 停止 acadclr mcp --http 子进程（Streamable HTTP，127.0.0.1:7140/mcp）。</summary>
+        [CommandMethod("ACADCLR_MCP")]
+        public void Mcp() => Print(McpProcess.Toggle());
 
         /// <summary>切换只读模式：开启后拒绝一切修改图形的请求，查询照常。</summary>
         [CommandMethod("ACADCLR_READONLY")]

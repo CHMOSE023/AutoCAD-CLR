@@ -240,6 +240,13 @@ namespace AcadClr.Core
             new CommandDef("help", "help [type|命令]", "查看类型、命令的参数与属性", CommandModes.None, false,
                 new ArgDef("topic", ArgKind.String, "类型名（line、layer…）、edit、edit <动作>、plot；不填为总览") { Position = 0, Rest = true }),
 
+            new CommandDef("mcp", "mcp [--http [--port 7140]]", "启动 MCP server：默认 stdio；--http 为 Streamable HTTP（127.0.0.1）", CommandModes.None, false,
+                A("http", ArgKind.Boolean, "用 Streamable HTTP 代替 stdio", option: "--http"),
+                A("port", ArgKind.Integer, "HTTP 端口（旧的 AutoCadMCP 插件占用 7130）", option: "--port", def: "7140"),
+                A("token", ArgKind.String, "HTTP 要求 Authorization: Bearer <token>；也可用环境变量 ACADCLR_MCP_TOKEN", option: "--token"),
+                A("readOnly", ArgKind.Boolean, "只读：修改图形的工具不出现在工具列表，调用也拒绝", option: "--read-only"),
+                A("allowLisp", ArgKind.Boolean, "开放 lisp / script 工具（任意代码执行，默认不开放）", option: "--allow-lisp")) { CliOnly = true },
+
             new CommandDef("config", "config [acad <年份|auto>]", "查看或设置离线模式默认使用的 AutoCAD 版本", CommandModes.None, false,
                 new ArgDef("args", ArgKind.StringList, "配置项与值") { Position = 0, Rest = true }) { CliOnly = true },
         };
