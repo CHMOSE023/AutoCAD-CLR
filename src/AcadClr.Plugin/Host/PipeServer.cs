@@ -43,13 +43,7 @@ namespace AcadClr.Plugin.Host
             Directory.CreateDirectory(Constants.InstancesDir);
             _discoveryFile = Path.Combine(Constants.InstancesDir, info.Pid + ".json");
             info.Pipe = PipeName;
-            WriteDiscovery(info);
-        }
-
-        /// <summary>更新发现文件（例如 HTTP 服务启动后补上端口）。</summary>
-        public void WriteDiscovery(InstanceInfo info)
-        {
-            if (_discoveryFile != null) File.WriteAllText(_discoveryFile, Json.Serialize(info, true));
+            File.WriteAllText(_discoveryFile, Json.Serialize(info, true));
         }
 
         private void AcceptLoop()

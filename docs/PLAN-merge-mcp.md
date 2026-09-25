@@ -98,14 +98,14 @@ AcadClr.Plugin
 
 ## 步骤 1：整理宿主层
 
-- [ ] 处理未跟踪的 `src/AcadClr.Cli/Properties/`（提交或加入 `.gitignore`）
-- [ ] `Host/MainThread`：吸收 MCP 版在 Idle 中补取主窗口句柄的逻辑
-- [ ] `PipeServer`：ACL 只允许当前用户；请求支持超时，客户端断开时插件能感知
-- [ ] 协议补充：图片结果（`view capture`）、长耗时操作的超时参数
-- [ ] 对比 MCP 的 `Lisp.cs`（命令队列桥：`SendStringToExecute` + 结果文件轮询）与 `Host/LispRunner.cs`，合成一份
-- [ ] 删除 `InstanceInfo.HttpPort`：插件不再提供 HTTP，实例发现只需管道名
+- [x] 处理未跟踪的 `src/AcadClr.Cli/Properties/`（已不存在，无需处理）
+- [x] `Host/MainThread`：吸收 MCP 版在 Idle 中补取主窗口句柄的逻辑（主线程用 `Application.MainWindow.Handle`，管道线程只在未取到时用进程 API 临时顶上）
+- [x] `PipeServer`：ACL 只允许当前用户；请求支持超时，客户端断开时插件能感知
+- [x] 协议补充：图片结果（`view capture`）、长耗时操作的超时参数
+- [x] 对比 MCP 的 `Lisp.cs`（命令队列桥：`SendStringToExecute` + 结果文件轮询）与 `Host/LispRunner.cs`，合成一份（`eval_lisp` 开关与日志归步骤 3）
+- [x] 删除 `InstanceInfo.HttpPort`：插件不再提供 HTTP，实例发现只需管道名
 
-验收：`tests/smoke.ps1` 全部通过。
+验收：`tests/smoke.ps1` 全部通过。（2026-09-25 用 `-Acad 2020` 通过；2014 的受信任位置未包含本仓库 `bin\Release`，离线插件无法加载）
 
 ## 步骤 2：统一命令层，补齐 Engine 能力
 

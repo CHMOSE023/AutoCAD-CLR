@@ -17,7 +17,7 @@ namespace AcadClr.Plugin.Host
         private const int PlotTimeoutMs = 180_000;
 
         /// <summary>
-        /// 在请求线程（管道 / HTTP）上调用。<paramref name="ct"/> 在调用方断开时取消，
+        /// 在管道线程上调用。<paramref name="ct"/> 在调用方断开时取消，
         /// 取消时抛出 <see cref="OperationCanceledException"/>，由调用方丢弃结果。
         /// </summary>
         public static Response Handle(Request req, CancellationToken ct)

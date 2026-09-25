@@ -304,9 +304,5 @@ namespace AcadClr.Core
         [JsonProperty("pipe")] public string Pipe { get; set; } = "";
         [JsonProperty("acadVersion")] public string AcadVersion { get; set; } = "";
         [JsonProperty("started")] public DateTime Started { get; set; }
-
-        /// <summary>MCP HTTP 服务端口；未启动 HTTP 时为空。</summary>
-        [JsonProperty("httpPort", NullValueHandling = NullValueHandling.Ignore)]
-        public int? HttpPort { get; set; }
     }
 }
