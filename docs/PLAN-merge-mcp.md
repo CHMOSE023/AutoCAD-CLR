@@ -63,8 +63,8 @@ AcadClr.Plugin
 - **参数同名同义**：CLI 的 `--prop k=v` ↔ MCP 的 `props: {k: v}`；位置参数 ↔ `path` / `parent` / `selector`；
   `--best-effort` ↔ `bestEffort`；`--dwg` ↔ `dwg`；`--pid` ↔ `pid`。MCP `batch` 工具的 `items` 与 `acadclr batch --input` 的文件内容完全相同。
 - **一套传输**：MCP 与 CLI 调用同一个 `LiveTransport` / `OfflineTransport`，实例选择、超时、离线格式检查与另存行为完全一致。
-- **Engine 只认 `Request → Response`**，不关心来源。CLI 端只做参数解析和输出格式化，不再组装业务逻辑
-  （现在 `CommandEdits.cs` 在 CLI 端把 trim / fillet 拼成 LISP，`plot` 在 CLI 端解析布局名，都要下沉到插件）。
+- **Engine 只认 `Request → Response`**，不关心来源。`Program.cs` 只做命令行解析和输出格式化；
+  需要在插件外完成的组装（trim / fillet 拼 LISP、离线打印的脚本）放在 `Dispatcher`，CLI 与 MCP 共用。
 - **一套结果与错误**：MCP 返回的 `structuredContent` 就是 `Response` JSON；错误码、`suggestion` 与 CLI `--json` 完全一致。
 - `Schema.cs` 仍是类型、属性、动作的唯一来源；`props` 在工具 schema 中是开放对象，校验在 Engine 里做，出错带 `suggestion`。
 - **安全分两层**：插件 Safety 管“能不能写”（只读、备份、回滚），所有入口一视同仁；`acadclr mcp` 的 HTTP 层管“谁能连”（Origin、token）。
@@ -76,7 +76,7 @@ AcadClr.Plugin
 | 命令（= MCP 工具名） | 参数（CLI 写法 → MCP `arguments`） | 可进 batch |
 |---|---|---|
 | `status` | — | |
-| `help` | `[type]` → `topic` | |
+| `help` | `[type\|命令]` → `topic` | |
 | `instances` | — | |
 | `get` | `<path> --depth --limit` → `path, depth, limit` | ✓ |
 | `query` | `<selector> --limit` → `selector, limit` | ✓ |
@@ -86,11 +86,11 @@ AcadClr.Plugin
 | `edit` | `<action> <target> --prop` → `action, path \| selector, props` | ✓（命令类动作除外） |
 | `batch` | `--input f.json --best-effort --stop-on-error` → `items, bestEffort, stopOnError` | — |
 | `stats` | — | ✓ |
-| `plot` | `<layout> --prop` → `path, props` | |
+| `plot` | `<layout> --prop` → `layout, props` | |
 | `save` | `--as` → `saveAs` | |
 | `create` | `<file.dwg>` → `dwg` | |
-| `lisp` | `"<code>" --cmd --save` → `code, commandQueue, save` | |
-| `script` | `--text` → `code` | |
+| `lisp` | `"<code>" --file --cmd --save` → `code, file, commandQueue, save` | |
+| `script` | `<file> --text --dwg… --save` → `file, code, dwg（数组）, save` | |
 | 新增：`measure` `check` `view` `mark` `rollback` `undo` `log` | 见步骤 2 | 按动词定 |
 
 公共参数（所有工具可选）：`dwg`（离线操作该文件）、`pid`（实时模式选实例，不填连最近启动的）、`doc`（实例内的文档名，不填用当前文档）、`timeout`（秒）。
@@ -109,15 +109,20 @@ AcadClr.Plugin
 
 ## 步骤 2：统一命令层，补齐 Engine 能力
 
-### 2.1 命令表与下沉
+### 2.1 命令表与统一入口
 
-- [ ] 新增 `Core/Commands.cs`：命令名、说明、参数定义、是否写操作；`Program.cs` 的 `switch` 改为按命令表解析，`help` 的命令列表由它生成
-- [ ] 抽出 `Dispatcher`：`(命令名, JObject 参数) → Response`，内部决定走 `LiveTransport` 还是 `OfflineTransport`；
-      CLI 把命令行参数转成 JObject 后调用它，MCP 直接把 `arguments` 交给它
-- [ ] `edit trim / extend / fillet / chamfer`：`CommandEdits.Build` / `Interpret` 移到插件 Engine，CLI 只发 `edit` 请求
-- [ ] `plot`：布局名解析、属性校验移到插件；离线 `plot` 仍走 accoreconsole 文档模式，但请求格式相同
-- [ ] `lisp` / `script` / `save` / `status` 统一成 `BatchItem.Command`（`Request.Kind` 只区分传输层用途）
-- [ ] 测试：命令表中每个命令从 CLI 参数和 JSON 参数构造出**相同的** `Request`
+- [x] 新增 `Core/Commands.cs`：命令名、说明、参数定义、是否写操作；`Program.cs` 的 `switch` 改为按命令表解析，`help` 的命令列表由它生成；
+      新增 `acadclr help <命令>`，列出命令行写法与 JSON / MCP 参数名的对照
+- [x] 抽出 `Cli/Dispatcher`：`(命令名, JObject 参数) → Response`，内部决定走 `LiveTransport` 还是 `OfflineTransport`；
+      CLI 把命令行参数转成 JObject 后调用它，MCP 直接把 `arguments` 交给它；`Prepare` 只构造请求、不连接，供测试比对
+- [x] `edit trim / extend / fillet / chamfer`：从 `Program.cs` 移到 `Dispatcher`，**不进插件**。
+      原因：MCP server 已定在 `acadclr.exe`，`Dispatcher` 就是 CLI 与 MCP 共用的一层；而离线执行要靠 accoreconsole 脚本上下文
+      （插件命令里不能再跑 `(command ...)`），放进插件反而要拆成实时 / 离线两处
+- [x] `plot`：布局名解析、属性校验改用 `Schema.PlotLayoutName` / `Schema.CheckPlotProps`，CLI 与插件共用一份（删掉 CLI 端的正则解析）
+- [ ] ~~`lisp` / `script` / `save` / `status` 统一成 `BatchItem.Command`~~：暂不做。统一的对外接口是 `Dispatcher` 的 (命令, 参数)，
+      `Request.Kind` 只是插件的线协议；这几个命令都不能进 batch，改线协议只有风险没有收益。等 mark / rollback 等新动词需要时再议
+- [x] 测试：新增 `tests/AcadClr.Tests`（xunit，90 个用例）：命令表一致性、命令行 → JSON 参数、两种写法构造出**相同的** `Request`、
+      参数错误的提示；`tests/smoke.ps1 -Acad 2020` 输出与重构前逐行一致
 
 ### 2.2 补齐能力
 
@@ -130,7 +135,7 @@ AcadClr.Plugin
 | 标注填充 | dim_linear / aligned / angular / radius / diameter、leader、hatch | 已有 | 同上 |
 | 查询 | query_entities、get_entity、select | 已有 `get` / `query` | `select` 的过滤条件并入选择器语法 |
 | 修改 | move / rotate / scale / offset / mirror / explode / array_rect / array_polar / break_entity / join / erase_entity / set_entity_layer | 已有 | `set --prop move=…`、`edit …`、`remove`；吸收 MCP 版的修复 |
-| 修改（缺） | copy、trim、extend、fillet、chamfer | trim 等在 CLI 端 | `add --from`（copy）、`edit`（下沉后 MCP 可用） |
+| 修改（缺） | copy、trim、extend、fillet、chamfer | 已有（trim 等在 `Dispatcher`） | `add --from`（copy）、`edit` |
 | 图层线型块 | list_layers / create_layer / set_current_layer、list_linetypes、list_blocks / define_block / insert_block | 有 `layer`、`insert` | 新增 `/linetypes`、`/blocks` 节点与 `block` 类型；当前图层用 `set / --prop currentLayer=` |
 | 布局打印外参 | list / create / delete / set_layout、list / add / set_viewport、list_plot_devices、set_page_setup、plot_pdf、list / attach / manage / bind_xref | 已有 | `get/add/set/remove /layouts`、`plot`；对比 MCP 的 `Plot.cs`（620 行），合成一份 |
 | 测量校验 | measure_distance / measure_area、check_overlap / check_inside / check_adjacency | 无 | 新增 `measure`、`check` 动词 |
@@ -140,7 +145,7 @@ AcadClr.Plugin
 | 撤销与日志 | mark / rollback、undo、get_log、get_status | batch 原子回滚、status | 新增 `mark` / `rollback` / `undo` / `log` 动词 |
 | 逃生口 | run_command、eval_lisp | 已有 `script` / `lisp` | 保持现状 |
 
-建议顺序：命令表与下沉 → 修改（缺）→ 测量校验 → 视图 → 块与线型 → 系统 → 文档 → 撤销与日志 → 已有能力的差异对比。
+建议顺序：命令表与统一入口 → 修改（缺）→ 测量校验 → 视图 → 块与线型 → 系统 → 文档 → 撤销与日志 → 已有能力的差异对比。
 
 验收：85 个工具的每项能力都能用统一命令完成，CLI 可以调用，`help` 能查到，`tests/` 下有对应用例；
 对照表（步骤 5）每一行都有可运行的等价调用。
@@ -236,7 +241,7 @@ acadclr mcp --http [--port 7140]             # Streamable HTTP，常驻
 | 多一个进程：HTTP 模式需要常驻 `acadclr mcp` | 推荐 stdio（客户端自动拉起）；HTTP 模式可由 `ACADCLR_MCP` 从 AutoCAD 里拉起，随 AutoCAD 退出 |
 | MCP 走离线模式时每次调用启动 accoreconsole（3–5 秒） | 工具说明提示合并成一次 `batch`；进度用 `notifications/progress` 推送 |
 | 多个 MCP 客户端 / CLI 同时操作同一实例 | 插件主线程串行执行；Safety 的操作日志记录来源（cli / mcp-stdio / mcp-http） |
-| 下沉 trim / plot 时 CLI 行为变化 | 下沉前先为现有 CLI 行为补测试，下沉后同一组测试必须通过 |
+| 命令行改为按命令表解析后行为变化 | 已用单元测试固定命令行 → 参数的映射；冒烟测试输出与重构前逐行比对（2.1 已通过） |
 | 两份 Layouts / Plot 实现行为不同，移植时丢失 MCP 版的修复 | 逐文件对比；MCP 实测通过的场景都写成测试用例 |
 | 长耗时操作（打印、命令队列桥）超时 | 请求带超时；HTTP 用 SSE 推进度；客户端断开时取消管道请求 |
 | 新规范刚发布，客户端实现不一 | 新旧协议逐请求判定，两套测试都跑 |

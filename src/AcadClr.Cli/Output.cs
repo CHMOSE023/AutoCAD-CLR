@@ -13,6 +13,14 @@ namespace AcadClr.Cli
     {
         public static int Render(Response resp, string verb, bool json, bool offline)
         {
+            if (verb == "help" && resp.Data != null)
+            {
+                // help --json 输出类型的结构化定义；总览、命令、edit、plot 只有文本
+                if (json && resp.Data["schema"] is Newtonsoft.Json.Linq.JObject schema) Console.WriteLine(schema.ToString());
+                else Console.Write(resp.Data["text"]?.ToString());
+                return 0;
+            }
+
             if (json)
             {
                 Console.WriteLine(Json.Serialize(resp, true));
@@ -26,7 +34,17 @@ namespace AcadClr.Cli
                 return resp.Error.Code == "lisp_error" ? 1 : 2;
             }
 
-            if (verb == "lisp")
+            if (verb == "instances" && resp.Data?["instances"] is Newtonsoft.Json.Linq.JArray list)
+            {
+                if (list.Count == 0) { Console.WriteLine("没有加载了 AutoCADCLR 插件的 AutoCAD 实例。"); return 0; }
+                foreach (var i in list.ToObject<System.Collections.Generic.List<InstanceInfo>>()!)
+                    Console.WriteLine($"pid={i.Pid}  AutoCAD {i.AcadVersion}  启动于 {i.Started:yyyy-MM-dd HH:mm:ss}  管道 {i.Pipe}");
+                if (list.Count > 1) Console.WriteLine("默认连接最近启动的实例；用 --pid 指定其他实例。");
+                return 0;
+            }
+
+            // 命令式 edit（trim / extend / fillet / chamfer）经 LISP 执行，返回值与 lisp 相同
+            if (verb == "lisp" || verb == "edit" && resp.Items == null)
             {
                 Console.WriteLine(resp.Data?["value"]?.ToString() ?? "nil");
                 if (resp.Saved == true) Console.WriteLine("已保存：" + resp.Document);

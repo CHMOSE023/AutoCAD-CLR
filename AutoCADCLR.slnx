@@ -4,4 +4,7 @@
     <Project Path="src/AcadClr.Plugin/AcadClr.Plugin.csproj" />
     <Project Path="src/AcadClr.Cli/AcadClr.Cli.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AcadClr.Tests/AcadClr.Tests.csproj" />
+  </Folder>
 </Solution>

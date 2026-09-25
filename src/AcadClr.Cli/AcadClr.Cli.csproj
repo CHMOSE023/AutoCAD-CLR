@@ -12,6 +12,9 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="AcadClr.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\AcadClr.Core\AcadClr.Core.csproj" />
   </ItemGroup>
 </Project>

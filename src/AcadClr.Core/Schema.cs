@@ -461,6 +461,36 @@ namespace AcadClr.Core
             P("mono", "bool", Verbs.Set, "单色（monochrome.ctb）"),
         };
 
+        /// <summary>校验打印属性名（不区分大小写），返回规范名 → 值。</summary>
+        public static Dictionary<string, string> CheckPlotProps(IEnumerable<KeyValuePair<string, string>> props)
+        {
+            var map = new Dictionary<string, string>();
+            foreach (var kv in props)
+            {
+                var def = PlotProps.FirstOrDefault(p => p.Name.Equals(kv.Key, StringComparison.OrdinalIgnoreCase));
+                if (def == null)
+                {
+                    var near = Suggest(kv.Key, PlotProps.Select(p => p.Name));
+                    throw new CliError("unsupported_property", $"plot 没有属性 “{kv.Key}”。", (near != null ? $"是否想用 {near}？" : "") + "运行 acadclr help plot");
+                }
+                map[def.Name] = kv.Value;
+            }
+            return map;
+        }
+
+        /// <summary>打印目标 “/layout[@name=A3]”、“/model”、“A3”、“Model” → 布局名；空为 null。</summary>
+        public static string? PlotLayoutName(string? target)
+        {
+            if (string.IsNullOrWhiteSpace(target)) return null;
+            var t = target!.Trim();
+            if (!PathParser.IsPath(t)) return t;
+            var segs = PathParser.Parse(t);
+            var seg = segs.LastOrDefault(x => x.Name == "layout");
+            if (seg?.AttrName == "name") return seg.AttrValue;
+            if (segs.Count == 1 && segs[0].Name == "model") return "Model";
+            throw new CliError("invalid_path", $"plot 的目标应为布局：{t}", "例：/layout[@name=A3] 或直接写布局名");
+        }
+
         public static string HelpPlot()
         {
             var sb = new StringBuilder();
@@ -538,29 +568,14 @@ namespace AcadClr.Core
             sb.AppendLine("用法：acadclr <命令> [参数] [--prop key=value ...] [--json]");
             sb.AppendLine();
             sb.AppendLine("命令：");
-            sb.AppendLine("  status                         连接状态与当前图形信息");
-            sb.AppendLine("  get <path> [--depth N]         读取元素（及子元素）");
-            sb.AppendLine("  query <selector>               按选择器查找，如 line[layer=WALL][length>=3000]");
-            sb.AppendLine("  add <parent> --type T          添加元素；--from <path> 克隆已有实体");
-            sb.AppendLine("  set <path|selector>            修改属性（含 move / rotate / scale）");
-            sb.AppendLine("  remove <path|selector>         删除（一次超过 30 个需 --force）");
-            sb.AppendLine("  edit <动作> <目标>             偏移 镜像 分解 打断 合并 阵列 修剪 延伸 倒圆角 倒角");
-            sb.AppendLine("  plot [布局]                    打印到 PDF（acadclr help plot）");
-            sb.AppendLine("  batch                          批量执行 JSON（--input 文件 / --commands 字符串 / 标准输入）");
-            sb.AppendLine("  stats                          按类型、图层统计实体，给出图形范围");
-            sb.AppendLine("  lisp \"<expr>\" | --file f.lsp   执行 AutoLISP 并返回值（--cmd 走命令队列，离线加 --save 保存）");
-            sb.AppendLine("  script f.scr | --text \"...\"    执行脚本；离线可对多个 --dwg（支持通配符）批量运行");
-            sb.AppendLine("  save [--as path]               保存（实时模式）");
-            sb.AppendLine("  create <file.dwg>              新建空白 DWG（离线）");
-            sb.AppendLine("  instances                      列出加载了插件的 AutoCAD 实例");
-            sb.AppendLine("  help [type]                    查看类型与属性");
+            sb.Append(Commands.HelpList());
             sb.AppendLine();
             sb.AppendLine("两种模式：");
             sb.AppendLine("  实时模式（默认）   操作已打开的 AutoCAD（需先 NETLOAD AcadClr.Plugin.dll）");
             sb.AppendLine("  离线模式 --dwg F   通过 accoreconsole 直接读写 DWG 文件，无需打开 AutoCAD 界面");
             sb.AppendLine();
-            sb.AppendLine("全局选项：--json  --dwg <file>  --acad <accoreconsole 路径或年份>  --pid <进程号>");
-            sb.AppendLine("          --best-effort  --stop-on-error  --force  --depth N  --limit N  --timeout 秒");
+            sb.AppendLine("全局选项：--json  --dwg <file>  --acad <accoreconsole 路径或年份>  --pid <进程号>  --timeout 秒");
+            sb.AppendLine("各命令的选项见 acadclr help <命令>；同名参数也是 MCP 工具的参数（--best-effort → bestEffort）");
             sb.AppendLine();
             sb.AppendLine("路径：/  /model  /model/line[1]  /model/entity[@handle=2A3]  /entity[@handle=2A3]");
             sb.AppendLine("      /layers  /layer[@name=WALL]  /xrefs  /xref[@name=BASE]  /devices  /device[@name=...]");

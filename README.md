@@ -21,9 +21,10 @@ AcadClr.Core.dll：协议、路径 / 选择器解析、属性 schema、help —�
 
 | 目录 | 内容 |
 |---|---|
-| `src/AcadClr.Core` | `Protocol.cs` 请求 / 响应，`PathSyntax.cs` 路径与选择器，`Schema.cs` 类型与属性定义（help 与校验的唯一来源），`Values.cs` 值解析 |
+| `src/AcadClr.Core` | `Protocol.cs` 请求 / 响应，`PathSyntax.cs` 路径与选择器，`Schema.cs` 类型与属性定义（help 与校验的唯一来源），`Commands.cs` 命令与参数定义（命令行解析、help 的唯一来源），`Values.cs` 值解析 |
 | `src/AcadClr.Plugin` | `Engine/Executor.cs` 执行批处理（外层事务 + 每条一个嵌套事务），`Engine/Mutate.cs` 增改，`Engine/Nodes.cs` 读取，`Host/` 管道服务、主线程调度、离线入口 |
-| `src/AcadClr.Cli` | `acadclr.exe`：参数解析、实时 / 离线两种传输、文本与 JSON 输出 |
+| `src/AcadClr.Cli` | `acadclr.exe`：`Program.cs` 命令行 → JSON 参数，`Dispatcher.cs` 参数 → 请求并选择实时 / 离线传输，`Output.cs` 文本与 JSON 输出 |
+| `tests` | `AcadClr.Tests` 单元测试（`dotnet test`，不需要 AutoCAD），`smoke.ps1` 离线冒烟测试 |
 
 ## 构建
 
@@ -96,9 +97,10 @@ acadclr stats plan.dwg
 | `save [--as path]` | 保存（实时模式） |
 | `create <file.dwg>` | 新建空白 DWG（离线，单位默认 mm） |
 | `instances` | 列出加载了插件的 AutoCAD 实例 |
-| `help [type] [--json]` | 查看类型与属性 |
+| `help [type\|命令] [--json]` | 查看类型的属性，或命令的参数（命令行写法与 JSON / MCP 参数名对照） |
 
-全局选项：`--json`、`--dwg`、`--acad`、`--pid`、`--best-effort`、`--stop-on-error`、`--force`、`--timeout`。
+全局选项：`--json`、`--dwg`、`--acad`、`--pid`、`--timeout`。其余选项属于各自的命令（`--best-effort`、`--stop-on-error` 只用于 `batch`，
+`--force` 用于 `set`、`remove`、`edit`、`batch`），用错命令会直接报错；`acadclr help <命令>` 查看某个命令的全部参数。
 
 退出码：`0` 成功，`1` 有操作失败，`2` 用法错误或无法连接。
 

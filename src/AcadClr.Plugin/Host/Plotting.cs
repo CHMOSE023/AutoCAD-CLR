@@ -41,51 +41,19 @@ namespace AcadClr.Plugin.Host
         private static Job? _pending;
         private static readonly object Gate = new object();
 
-        public static Dictionary<string, string> CheckProps(IEnumerable<KeyValuePair<string, string>> props)
-        {
-            var map = new Dictionary<string, string>();
-            foreach (var kv in props)
-            {
-                var def = Schema.PlotProps.FirstOrDefault(p => p.Name.Equals(kv.Key, StringComparison.OrdinalIgnoreCase));
-                if (def == null)
-                {
-                    var near = Schema.Suggest(kv.Key, Schema.PlotProps.Select(p => p.Name));
-                    throw new CliError("unsupported_property", $"plot 没有属性 “{kv.Key}”。", (near != null ? $"是否想用 {near}？" : "") + "运行 acadclr help plot");
-                }
-                map[def.Name] = kv.Value;
-            }
-            return map;
-        }
-
-        /// <summary>“/layout[@name=A3]”、“A3”、“Model” → 布局名；空为 null。</summary>
-        public static string? LayoutName(string? target)
-        {
-            if (string.IsNullOrWhiteSpace(target)) return null;
-            var t = target!.Trim();
-            if (PathParser.IsPath(t))
-            {
-                var segs = PathParser.Parse(t);
-                var seg = segs.LastOrDefault(s => s.Name == "layout");
-                if (seg?.AttrName == "name") return seg.AttrValue;
-                if (segs.Count == 1 && segs[0].Name == "model") return Layouts.ModelName;
-                throw new CliError("invalid_path", $"plot 的目标应为布局：{t}", "例：/layout[@name=A3] 或直接写布局名");
-            }
-            return t;
-        }
-
         // ---------------- 实时模式（管道线程调用） ----------------
 
         public static Response Live(Request req, int timeoutMs)
         {
             var item = req.Items.FirstOrDefault() ?? new BatchItem();
-            var props = CheckProps(item.GetProps());
+            var props = Schema.CheckPlotProps(item.GetProps());
             var doc = MainThread.Invoke(() => CoreApp.DocumentManager.MdiActiveDocument
                 ?? throw new CliError("no_document", "AutoCAD 当前没有打开的图形。"), 10_000);
 
             // 目标布局与原布局都在主线程（应用上下文）里读
             string target = MainThread.Invoke(() =>
             {
-                var name = LayoutName(item.Path) ?? Layouts.CurrentName();
+                var name = Schema.PlotLayoutName(item.Path) ?? Layouts.CurrentName();
                 using (var tr = doc.Database.TransactionManager.StartTransaction())
                 {
                     var id = Layouts.Find(doc.Database, tr, name);
@@ -153,11 +121,11 @@ namespace AcadClr.Plugin.Host
             {
                 req = Json.Deserialize<Request>(File.ReadAllText(path));
                 var item = req.Items.FirstOrDefault() ?? new BatchItem();
-                var want = LayoutName(item.Path) ?? Layouts.ModelName;
+                var want = Schema.PlotLayoutName(item.Path) ?? Layouts.ModelName;
                 var cur = Layouts.CurrentName();
                 if (!cur.Equals(want, StringComparison.OrdinalIgnoreCase))
                     throw new CliError("not_found", $"没能切换到布局 “{want}”（当前是 “{cur}”），可能不存在。", "运行 acadclr get <dwg> /layouts 查看");
-                resp = Execute(CoreApp.DocumentManager.MdiActiveDocument, cur, CheckProps(item.GetProps()));
+                resp = Execute(CoreApp.DocumentManager.MdiActiveDocument, cur, Schema.CheckPlotProps(item.GetProps()));
             }
             catch (CliError ex) { resp = new Response { Ok = false, Error = ex.ToInfo() }; }
             catch (Exception ex) { resp = Response.Fail("plot_failed", ex.GetType().Name + "：" + ex.Message); }
