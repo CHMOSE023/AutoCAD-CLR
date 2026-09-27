@@ -43,7 +43,7 @@ namespace AcadClr.Tests
         }
 
         private (int status, string body, HttpResponseMessage resp) Send(HttpMethod method, string? json,
-            bool auth = true, string? origin = null, string? version = null, string? mcpMethod = null, string? mcpName = null, string? contentType = "application/json")
+            bool auth = true, string? token = null, string? host = null, string? origin = null, string? version = null, string? mcpMethod = null, string? mcpName = null, string? contentType = "application/json")
         {
             var req = new HttpRequestMessage(method, _url);
             if (json != null)
@@ -52,7 +52,8 @@ namespace AcadClr.Tests
                 if (contentType != null) req.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(contentType);
             }
             req.Headers.TryAddWithoutValidation("Accept", "application/json, text/event-stream");
-            if (auth) req.Headers.TryAddWithoutValidation("Authorization", "Bearer " + Token);
+            if (auth) req.Headers.TryAddWithoutValidation("Authorization", "Bearer " + (token ?? Token));
+            if (host != null) req.Headers.Host = host;
             if (origin != null) req.Headers.TryAddWithoutValidation("Origin", origin);
             if (version != null) req.Headers.TryAddWithoutValidation("MCP-Protocol-Version", version);
             if (mcpMethod != null) req.Headers.TryAddWithoutValidation("Mcp-Method", mcpMethod);
@@ -112,6 +113,31 @@ namespace AcadClr.Tests
             Assert.Equal(403, Send(HttpMethod.Post, Call("help", "{}", false), origin: "http://evil.example.com").status);
             Assert.Equal(403, Send(HttpMethod.Post, Call("help", "{}", false), origin: "null").status);
             Assert.Equal(200, Send(HttpMethod.Post, Call("help", "{}", false), origin: "http://localhost:5173").status);
+        }
+
+        [Fact]
+        public void 错误token与非回环Host()
+        {
+            var (st, _, resp) = Send(HttpMethod.Post, Call("help", "{}", false), token: "wrong");
+            Assert.Equal(401, st);
+            Assert.Contains("Bearer", resp.Headers.WwwAuthenticate.ToString());
+            // DNS 重绑定：域名解析到 127.0.0.1，但 Host 头是外部域名
+            Assert.Equal(403, Send(HttpMethod.Post, Call("help", "{}", false), host: "evil.example.com").status);
+            Assert.Equal(200, Send(HttpMethod.Post, Call("help", "{}", false), host: "localhost:" + _host.Port).status);
+        }
+
+        [Fact]
+        public void HTTP上的server_discover()
+        {
+            var body = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"server/discover\",\"params\":{" + Meta + "}}";
+            var (st, text, _) = Send(HttpMethod.Post, body, version: "2026-07-28", mcpMethod: "server/discover");
+            Assert.Equal(200, st);
+            var r = JObject.Parse(text)["result"]!;
+            Assert.Contains("2026-07-28", r["supportedVersions"]!.Select(v => (string)v!));
+            Assert.NotNull(r["capabilities"]!["tools"]);
+            Assert.Equal("complete", (string)r["resultType"]!);
+            // 请求头缺 Mcp-Method 同样被拒
+            Assert.Equal(400, Send(HttpMethod.Post, body, version: "2026-07-28").status);
         }
 
         [Fact]

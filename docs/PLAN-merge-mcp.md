@@ -267,14 +267,15 @@ acadclr mcp --http [--port 7140]             # Streamable HTTP，常驻
 
 ## 步骤 5：测试、迁移与收尾
 
-- [ ] `D:\AutoCADMCP\scripts\test-mcp.ps1` 移到 `tests/`，改为调用统一工具，拆成旧协议与新协议两套、stdio 与 HTTP 两种传输（脚本保持 ASCII）
-- [ ] `test/AcadMcp.ProtocolTest` 移到 `tests/`，补充 `server/discover`、版本协商、请求头校验、Origin 校验、token 用例
+- [x] `D:\AutoCADMCP\scripts\test-mcp.ps1` 移到 `tests/`，改为调用统一工具，拆成旧协议与新协议两套、stdio 与 HTTP 两种传输（脚本保持 ASCII）
+- [x] `test/AcadMcp.ProtocolTest` 移到 `tests/`（改写为 xunit：`McpHttpTests` 走真实 TCP，`McpTests` 测协议层），补充 `server/discover`、版本协商、请求头校验、Origin / Host 校验、token 用例
 - [x] 新增 `docs/migrate-from-autocad-mcp.md`：85 个旧工具逐个给出等价写法（命令行；MCP 按“参数同名”规则换写，文首给出对照示例），
       单元测试校验每条示例
-- [ ] SKILL.md 改为 CLI 与 MCP 共用：说明“参数同名”规则后只写一种例子
-- [ ] README 重写：统一命令、CLI、MCP（stdio 与 HTTP 两种 `.mcp.json` 示例）、离线模式
-- [ ] 版本号升到 0.2.0
-- [ ] AutoCad_MCP 仓库 README 改为指向本仓库与迁移文档，然后在 GitHub 上归档
+- [x] SKILL.md 改为 CLI 与 MCP 共用：说明“参数同名”规则后只写一种例子
+- [x] README 重写：统一命令、CLI、MCP（stdio 与 HTTP 两种 `.mcp.json` 示例）、离线模式
+- [x] 版本号升到 0.2.0
+- [x] AutoCad_MCP 仓库 README 改为指向本仓库与迁移文档（本地已提交）
+- [ ] 推送 AutoCad_MCP 并在 GitHub 上归档
 - [ ] （以后）AutoCAD 2025+ .NET 8：插件多目标编译 `net472;net8.0-windows`；`acadclr.exe` 不受影响
 
 ## 风险
