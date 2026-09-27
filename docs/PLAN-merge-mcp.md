@@ -168,7 +168,7 @@ AcadClr.Plugin
 - [x] 撤销：`mark` / `rollback` / `undo N`（命令队列执行并等待完成；按文档记录标记栈，没有标记时拒绝 rollback）。
       实测结论：插件的修改要用带命令名的 `LockDocument` 才会成为独立撤销步；任何文档锁都会留下撤销步，所以只读请求不加锁；
       UNDO N 必须在主线程作为独立命令发送。新增 `tests/live.ps1`（16 项，AutoCAD 2020 全部通过）
-- [ ] 操作日志：归入步骤 3 的 Safety（与来源、只读模式一起做）
+- [x] 操作日志：已在步骤 3 完成（`Cli/OpLog.cs`，`acadclr log`）
 - [x] 已有能力的差异对比：逐条核对 AutoCADMCP 注释里的实测结论（样条闭合只认节点矢量、打印的文档上下文 / 切布局时机 /
       BACKGROUNDPLOT / 图纸单位先设 / Destroy 引擎 / window 范围不可用、视口超过 MAXACTVP、UpdateExt 要加锁等），CLR 均已覆盖；
       唯一缺的 select 窗口过滤并入选择器：`[inside=x1,y1;x2,y2]`、`[crossing=x1,y1;x2,y2]`。
@@ -190,13 +190,13 @@ AcadClr.Plugin
 - [x] **操作日志改在 `acadclr.exe`（`Cli/OpLog.cs`）**：CLI、MCP、离线三条路径都经过 Dispatcher，插件只看得到实时请求。
       一行一次调用（时间、来源 `Request.source`、目标、命令、结果、耗时、参数摘要、错误、备份）；`acadclr log [N]` 查看；
       被策略拒绝的调用也记。直接连管道、绕过 acadclr 的客户端不会被记录
-- [ ] `ACADCLR_MCP`（拉起或停止 `acadclr mcp --http` 子进程）：随步骤 4 实现
+- [x] `ACADCLR_MCP`（拉起或停止 `acadclr mcp --http` 子进程）：已在步骤 4 完成
 
 `acadclr mcp` 侧：
 - [x] 策略已在 Dispatcher 实现并有单元测试：`Dispatcher.AllowLisp = false` 拒绝 lisp / script，`Dispatcher.ReadOnly = true` 拒绝写操作
       （离线同样生效，与插件只读互相独立）；`Dispatcher.Source` 写进请求与日志
-- [ ] 启动参数 `--allow-lisp` / `--read-only` 接到上述策略，并据此过滤 `tools/list`：随步骤 4 实现
-- [ ] HTTP 可选 token 鉴权（`Authorization: Bearer`，`--token` 或环境变量 `ACADCLR_MCP_TOKEN`）；stdio 不需要：随步骤 4 实现
+- [x] 启动参数 `--allow-lisp` / `--read-only` 接到上述策略，并据此过滤 `tools/list`：已在步骤 4 完成
+- [x] HTTP 可选 token 鉴权（`Authorization: Bearer`，`--token` 或环境变量 `ACADCLR_MCP_TOKEN`）；stdio 不需要：已在步骤 4 完成
 
 验收：`tests/live.ps1` 增加安全层 11 项（只读、LISP 开关、写前备份、日志），AutoCAD 2020 上 27 项全部通过；单元测试 253 个
 
