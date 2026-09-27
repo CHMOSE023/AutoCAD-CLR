@@ -5,7 +5,7 @@
 
 约定：
 - 不建分支，在 `master` 上按步骤开发、按步骤提交。
-- `D:\AutoCADMCP` 只作为**能力清单与参考源码**，逐个功能移植进来，不导入其 git 历史；全部完成后归档。
+- `D:\AutoCADMCP` 只作为**能力清单与参考源码**，逐个功能移植进来，不导入其 git 历史；不归档，保持现状。
 - **MCP server 放在 `acadclr.exe` 里（`acadclr mcp`）**，经命名管道转发给插件；插件只保留管道一个入口，不内置 HTTP。
 - MCP 支持 stdio 与 Streamable HTTP 两种传输，按 **2026-07-28 无状态规范**实现，**同时兼容 2025-11-25 及更早的有握手协议**。
 - **不保留原 85 个 MCP 工具名与参数**。MCP 工具与 CLI 命令一一对应，名字相同、参数相同，都是 `Request` / `BatchItem` 的另一种写法。
@@ -274,8 +274,7 @@ acadclr mcp --http [--port 7140]             # Streamable HTTP，常驻
 - [x] SKILL.md 改为 CLI 与 MCP 共用：说明“参数同名”规则后只写一种例子
 - [x] README 重写：统一命令、CLI、MCP（stdio 与 HTTP 两种 `.mcp.json` 示例）、离线模式
 - [x] 版本号升到 0.2.0
-- [x] AutoCad_MCP 仓库 README 改为指向本仓库与迁移文档（本地已提交）
-- [ ] 推送 AutoCad_MCP 并在 GitHub 上归档
+- ~~AutoCad_MCP 仓库 README 改为指向本仓库与迁移文档，然后在 GitHub 上归档~~：取消，AutoCad_MCP 保持现状、不归档
 - [ ] （以后）AutoCAD 2025+ .NET 8：插件多目标编译 `net472;net8.0-windows`；`acadclr.exe` 不受影响
 
 ## 风险
